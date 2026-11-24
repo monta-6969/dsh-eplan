@@ -35,3 +35,7 @@ tools/build_*.py
 tools/draw_power_dist.py
 tools/onecall_check.py
 tools/uia_goto.py
+
+# 开发期备份，不进包
+_backup/
+
