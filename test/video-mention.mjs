@@ -74,7 +74,7 @@ check('摘要带阶段图', images.length >= 1, `${images.length} 张`)
 check('图是 JPEG（PNG 太大）', images.every((b) => b.attachment?.mediaType === 'image/jpeg'),
   JSON.stringify(images.map((b) => b.attachment?.mediaType)))
 check('阶段图不超过 4 张（给符号图鉴留额度）', images.length <= 4, `${images.length} 张`)
-check('摘要里写清了「不要自己抽帧」', texts.some((t) => t.includes('不要再调用 video()')))
+check('摘要里写清了「不要自己抽帧」', texts.some((t) => t.includes('不要') && t.includes('video()')))
 const big = images.map((b) => b.attachment?.bytes ?? 0)
 check('单张图不超过 400 KB', big.every((size) => size < 400 * 1024), JSON.stringify(big.map((n) => Math.round(n / 1024) + 'KB')))
 check('没有语音服务时写明原因', texts.some((t) => t.includes('语音转写') || t.includes('讲解：')))

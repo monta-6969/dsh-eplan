@@ -601,20 +601,74 @@ export async function digest(path, {
   at = null,
 } = {}) {
   const meta = await probe(path)
-  const key = createHash('sha1').update(`${meta.path}:${meta.bytes}`).digest('hex').slice(0, 12)
-  const outDir = workRoot ?? join(tmpdir(), 'eplan-mcp', 'video-digest', key)
+  // mtime 也进 key：同一个路径换了内容（重新导出录屏）必须重算，不能吃旧缓存。
+  const stamp = Math.round(statSync(path).mtimeMs)
+  const key = createHash('sha1').update(`${meta.path}:${meta.bytes}:${stamp}`).digest('hex').slice(0, 12)
+  const outDir = workRoot ? join(workRoot, key) : join(tmpdir(), 'eplan-mcp', 'video-digest', key)
+  const visibleDir = visibleDirFor(key)
+  const wantsFrame = at !== null && Number.isFinite(Number(at))
+
+  const shotAt = async (time, options) => grabFrame(path, meta, time, outDir, { visibleDir, ...options })
+
+  // ── 命中缓存 ────────────────────────────────────────────────────────────
+  // 2026-11-24 session-400917a2 的账：同一段 12:24 录屏被 video({at:245/500/565/700/742})
+  // 调了 5 次，每次 1.1~1.8 分钟（全片解码 + 重新转写），要的其实只是某秒的一张图。
+  // 现在命中即返回：只要图就只抓那一帧，段数变了就用缓存采样重排，绝不重新解码。
+  const cached = readDigestCache(outDir, maxEdge, frameQuality)
+  if (cached) {
+    let segments = cached.segments
+    let pages = cached.pages
+    // 只要某一秒的图就别重排：调用方要的是那一帧，重排既慢又会把缓存的段数改掉。
+    if (!wantsFrame && cached.maxPages !== maxPages) {
+      segments = planStages(cached.series, meta, maxPages)
+      pages = []
+      for (const segment of segments) {
+        const time = stableTime(segment, cached.series)
+        const shot = await shotAt(time, {
+          name: `stage-${String(segment.index).padStart(2, '0')}.png`,
+          maxEdge,
+          quality: frameQuality,
+        })
+        pages.push({ ...segment, shotAt: shot.t, shot })
+      }
+      writeDigestCache(outDir, { ...cached, maxPages, segments, pages })
+    }
+
+    const extra = []
+    if (wantsFrame) {
+      const shot = await shotAt(Number(at), { name: 'at.png', maxEdge: Math.max(maxEdge, 2000), quality: 2 })
+      extra.push({ t: shot.t, shot })
+    }
+
+    const text = renderDigest({ meta, pages, speech: cached.speech, visibleDir, extra })
+    writeFileSync(join(outDir, 'digest.json'), JSON.stringify({ meta, segments, pages, loud: cached.loud, speech: cached.speech, extra }, null, 2), 'utf8')
+    return {
+      ok: true,
+      key,
+      meta,
+      segments,
+      pages,
+      loud: cached.loud,
+      speech: cached.speech,
+      extra,
+      text,
+      workDir: outDir,
+      visibleDir,
+      cached: true,
+    }
+  }
+
+  // ── 冷启动：完整跑一遍，结果落盘 ─────────────────────────────────────────
   rmSync(outDir, { recursive: true, force: true })
   mkdirSync(outDir, { recursive: true })
-  const visibleDir = visibleDirFor(key)
 
   const series = await motionSeries(path, meta, outDir)
   const segments = planStages(series, meta, maxPages)
   const pages = []
   for (const segment of segments) {
     const time = stableTime(segment, series)
-    const shot = await grabFrame(path, meta, time, outDir, {
+    const shot = await shotAt(time, {
       name: `stage-${String(segment.index).padStart(2, '0')}.png`,
-      visibleDir,
       maxEdge,
       quality: frameQuality,
     })
@@ -642,19 +696,47 @@ export async function digest(path, {
   }
 
   const extra = []
-  if (at !== null && Number.isFinite(Number(at))) {
-    const shot = await grabFrame(path, meta, Number(at), outDir, {
-      name: 'at.png',
-      visibleDir,
-      maxEdge: Math.max(maxEdge, 2000),
-      quality: 2,
-    })
+  if (wantsFrame) {
+    const shot = await shotAt(Number(at), { name: 'at.png', maxEdge: Math.max(maxEdge, 2000), quality: 2 })
     extra.push({ t: shot.t, shot })
   }
 
   const text = renderDigest({ meta, pages, speech, visibleDir, extra })
   writeFileSync(join(outDir, 'digest.json'), JSON.stringify({ meta, segments, pages, loud, speech, extra }, null, 2), 'utf8')
-  return { ok: true, key, meta, segments, pages, loud, speech, extra, text, workDir: outDir, visibleDir }
+  writeDigestCache(outDir, { maxPages, maxEdge, frameQuality, meta, series, segments, pages, loud, speech })
+  return { ok: true, key, meta, segments, pages, loud, speech, extra, text, workDir: outDir, visibleDir, cached: false }
+}
+
+const DIGEST_CACHE_VERSION = 2
+
+function writeDigestCache(outDir, data) {
+  try {
+    writeFileSync(join(outDir, 'digest-cache.json'), JSON.stringify({ version: DIGEST_CACHE_VERSION, ...data }), 'utf8')
+  } catch (error) {
+    // 缓存写不进去只影响下次要不要重算，不影响这次交付。
+    process.stderr.write(`[eplan-mcp] 摘要缓存写不进去: ${error.message}\n`)
+  }
+}
+
+/**
+ * 读缓存。三条不信：版本不对、渲染参数变了、帧文件被系统清了。
+ * 只信磁盘上的实际文件，不信记录 —— 临时目录会被清理，指针比内容活得久。
+ */
+function readDigestCache(outDir, maxEdge, frameQuality) {
+  let data
+  try {
+    data = JSON.parse(readFileSync(join(outDir, 'digest-cache.json'), 'utf8'))
+  } catch {
+    return null
+  }
+  if (data?.version !== DIGEST_CACHE_VERSION) return null
+  if (data.maxEdge !== maxEdge || data.frameQuality !== frameQuality) return null
+  if (!Array.isArray(data.pages) || !Array.isArray(data.segments) || !data.series?.canvas) return null
+  if (!data.meta || !data.speech || typeof data.meta.duration !== 'number') return null
+  for (const page of data.pages) {
+    if (!page?.shot?.path || !existsSync(page.shot.path)) return null
+  }
+  return data
 }
 
 /** 判定「讲解」属于哪一种状态，并把原因写清楚 —— 空字符串绝不许悄悄过去。 */
@@ -733,7 +815,7 @@ export function renderDigest({ meta, pages, speech, visibleDir, extra = [] }) {
   }
   lines.push('')
   lines.push(`图片（可直接打开）：${visibleDir}`)
-  lines.push('已预处理完毕：不要再调用 video() 抽帧、不要放大细节；需要某一时刻的整页图就用 video({path, at:秒})。')
+  lines.push('已预处理完毕：不要再反复调 video() 抽帧、不要放大细节。要某一秒的整页图就 video({path, at:秒})——摘要已缓存，只回那一张图，几分之一秒。')
   lines.push('</video-digest>')
   return lines.join('\n')
 }

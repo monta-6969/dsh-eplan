@@ -115,11 +115,19 @@ export async function buildDigest(ctx, path, { at = null, maxImages = DEFAULT_MA
     transcribe: (spans, audioPath) => transcribeSpans(ctx, spans, audioPath, { language, signal }),
   })
 
+  // 只要「某一秒的那张图」，而且摘要是缓存命中的 → 只发那一张 + 一行说明。
+  //
+  // 2026-11-24 session-400917a2：模型用 video({path, at:245/500/565/700/742}) 连要 5 张图，
+  // 每次都把 3.5 KB 的全量摘要重发一遍（前后 17.6 KB 重复上下文）。它要的是图，不是摘要。
+  const frameOnly = at !== null && result.cached === true && result.extra.length > 0
+  const shots = frameOnly
+    ? result.extra.map((item) => item.shot)
+    : [...result.pages.map((page) => page.shot), ...result.extra.map((item) => item.shot)]
+
   const attachments = ctx.get('attachments')
   const blocks = []
   let images = []
-  if (attachments && result.pages.length + result.extra.length > 0) {
-    const shots = [...result.pages.map((page) => page.shot), ...result.extra.map((item) => item.shot)]
+  if (attachments && shots.length > 0) {
     const asImage = (shot) => ({
       data: readFileSync(shot.path),
       mediaType: shot.mimeType ?? 'image/png',
@@ -141,11 +149,29 @@ export async function buildDigest(ctx, path, { at = null, maxImages = DEFAULT_MA
       result.text += `\n（部分图片因总量限制没进上下文：${error.message}）`
     }
   }
-  blocks.push({ type: 'text', text: result.text })
+
+  if (frameOnly) {
+    const shotAt = result.extra[0]
+    blocks.push({
+      type: 'text',
+      text:
+        `录屏 ${clockOf(result.meta.duration)} 的 ${clockOf(shotAt.t)} 那一帧（第 1 张图）。`
+        + '摘要已在上文给过，这次没有重新解码，也没有重发全文；'
+        + '要看下一帧就再传一个 at 秒数。',
+    })
+  } else {
+    blocks.push({ type: 'text', text: result.text })
+  }
   for (let index = 0; index < images.length; index += 1) {
     blocks.push({ type: 'image', attachment: images[index] })
   }
   return { blocks, digest: result }
+}
+
+/** 秒 → m:ss；本地一份，别为了一个格式化去 import 整条管线。 */
+function clockOf(seconds) {
+  const total = Math.max(0, Math.round(Number(seconds) || 0))
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`
 }
 
 /** 摘要失败时给模型的一句话：路径留着，它还能自己试一次。 */

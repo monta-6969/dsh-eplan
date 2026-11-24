@@ -59,7 +59,7 @@ const rendered = renderDigest({
 })
 check('摘要明说「讲解：无」', rendered.includes('讲解：无——'), '')
 check('摘要逐张列图（不拼图）', rendered.includes('第 1 张图') && rendered.includes('不拼图'))
-check('摘要告诉模型别再抽帧', rendered.includes('不要再调用 video()'))
+check('摘要告诉模型别再抽帧', rendered.includes('不要') && rendered.includes('video()'))
 check('摘要包在 video-digest 标签里', rendered.startsWith('<video-digest>') && rendered.endsWith('</video-digest>'))
 
 // ── 工具装配 ──────────────────────────────────────────────────────────────
@@ -108,18 +108,34 @@ if (!VIDEO) {
   check('注册了 measure 工具', registered.measure?.name === 'measure')
   check('参数要求 path', captured?.parameters?.required?.includes('path'))
 
-  const result = await captured.execute({ path: VIDEO, maxImages: 3, at: 60 }, {})
-  const blocks = result?.content ?? []
-  const text = blocks.find((block) => block.type === 'text')?.text ?? ''
-  const images = blocks.filter((block) => block.type === 'image')
+  // 第一次不带 at：要的是完整摘要（阶段 + 讲解 + 图）。
+  const full = await captured.execute({ path: VIDEO, maxImages: 3 }, {})
+  const fullBlocks = full?.content ?? []
+  const text = fullBlocks.find((block) => block.type === 'text')?.text ?? ''
+  const images = fullBlocks.filter((block) => block.type === 'image')
 
   check('返回文字摘要', text.startsWith('<video-digest>'))
-  check(`图片逐张返回（不超过 maxImages+1=${4}）`, images.length > 0 && images.length <= 4, `${images.length} 张`)
+  check(`图片逐张返回（不超过 maxImages=${3}）`, images.length > 0 && images.length <= 3, `${images.length} 张`)
   check('每张图都有独立附件引用', images.every((block) => block.attachment?.attachmentId))
   check('图片张数与摘要里列的阶段数一致', (text.match(/第 \d+ 张图/g) ?? []).length === images.length,
     `文字 ${(text.match(/第 \d+ 张图/g) ?? []).length} / 图 ${images.length}`)
   check('有讲解时写「讲解：N 段」', /讲解：\d+ 段/.test(text), (text.match(/讲解：[^\n]*/) ?? [''])[0])
   check('摘要给出图片目录', text.includes('图片（可直接打开）：'))
+
+  // 第二次带 at，且摘要已在缓存里：只该回那一张图 + 一行说明，
+  // 不许把几千字的摘要再发一遍（session-400917a2 里重复发了 5 次，17.6 KB）。
+  const again = await captured.execute({ path: VIDEO, maxImages: 3, at: 60 }, {})
+  const againBlocks = again?.content ?? []
+  const againText = againBlocks.find((block) => block.type === 'text')?.text ?? ''
+  const againImages = againBlocks.filter((block) => block.type === 'image')
+  if (againText.startsWith('<video-digest>')) {
+    // 缓存没命中（比如临时目录被清了）：退化成完整摘要，这也是对的。
+    check('at 冷启动时退回完整摘要', againImages.length > 0 && againText.includes('指定时间点'))
+  } else {
+    check('at 命中缓存时只回一张图', againImages.length === 1, `${againImages.length} 张`)
+    check('at 命中缓存时不重发全文', againText.length < 300 && !againText.includes('画面阶段'), `${againText.length} 字符`)
+    check('at 命中缓存时说明没有重新解码', againText.includes('没有重新解码'))
+  }
 
   const failed = checks.filter((item) => !item.ok)
   console.log(`\n${failed.length === 0 ? '全部通过' : `失败 ${failed.length} 项`}：${checks.length - failed.length}/${checks.length}`)
