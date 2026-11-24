@@ -60,6 +60,80 @@ function fail(code, message) {
   return error
 }
 
+// ---------------------------------------------------------------------------
+// 硬件解码。
+//
+// 采样一遍整段录屏要把每一帧都解码，这是这条流水线里最贵的一步。
+// 实测（1080p H.264、631 s、fps=1 采样一遍，同一台机器）：
+//
+//   纯 CPU                              20.0 s
+//   cuda  + 只在采样后下载（本文件用法）    9.5 s
+//   d3d11va + 只在采样后下载                10.9 s
+//   cuda 不带 output_format（隐式逐帧下载） 27–52 s   ← 比 CPU 还慢
+//
+// 结论不是「开硬件解码就快」，而是「哪些帧被拷回内存」：
+// 把 fps 放在 GPU 上跑、每秒只 hwdownload 那一帧才省；逐帧下载会把省下的
+// 解码时间全赔在显存→内存的拷贝上。所以这里固定用
+// `-hwaccel X -hwaccel_output_format Y` + 滤镜里 fps 之后立刻 hwdownload。
+//
+// 单帧取图（grabFrame）**不**走硬件：每次调用要建一次解码上下文，
+// 实测比软件解码慢，而单帧本来就是几十毫秒的事。
+// ---------------------------------------------------------------------------
+let hwProbe = null
+// 这次进程里已经证明硬件解码跑不动（个别编码/驱动组合），别再试第二遍。
+let hwFailed = false
+
+/** 让测试和长跑进程能重新探测（换机器、换驱动、改环境变量的场景）。 */
+export function resetHardwareState() {
+  hwProbe = null
+  hwFailed = false
+}
+
+/** ffmpeg 这台机器上到底支持哪些硬件解码器，只问一次。 */
+async function availableAccel(ffmpeg) {
+  if (hwProbe) return hwProbe
+  let models = []
+  try {
+    const result = await run(ffmpeg, ['-hide_banner', '-hwaccels'])
+    models = result.stdout
+      .split('\n')
+      .map((line) => line.trim().toLowerCase())
+      .filter((line) => line && !line.endsWith(':'))
+  } catch {
+    models = [] // 连 -hwaccels 都跑不了就当没有硬件，走软件解码。
+  }
+  hwProbe = { models }
+  return hwProbe
+}
+
+/**
+ * 决定这次采样用不用硬件解码。
+ *
+ * 短片段不用：建一次解码上下文在 12 秒测试片上实测 342 ms，而纯软件只要 90 ms，
+ * 硬件解码省下的是「解码每一帧」的时间，片太短还没摊平初始化的开销。
+ * 默认门槛 120 秒，可用 EPLAN_MCP_HWACCEL_MIN_SECONDS 调；
+ * 显式写 EPLAN_MCP_HWACCEL=cuda / d3d11va 表示强制用（短片段也照用）。
+ */
+async function pickHwAccel(ffmpeg, seconds = 0) {
+  if (hwFailed) return null
+  const setting = String(process.env.EPLAN_MCP_HWACCEL ?? 'auto').trim().toLowerCase()
+  if (setting === 'off' || setting === 'none' || setting === '0') return null
+
+  const forced = setting !== 'auto' && setting !== 'always'
+  if (!forced) {
+    const minSeconds = Number(process.env.EPLAN_MCP_HWACCEL_MIN_SECONDS ?? 120)
+    if (Number.isFinite(minSeconds) && seconds < minSeconds) return null
+  }
+
+  const { models } = await availableAccel(ffmpeg)
+  const preferred = forced ? [setting] : ['cuda', 'd3d11va']
+  const model = preferred.find((name) => models.includes(name)) ?? null
+  if (!model) return null
+  const format = model === 'cuda' ? 'cuda' : model === 'd3d11va' ? 'd3d11' : model
+  process.stderr.write(`[eplan-mcp] 视频解码走硬件：${model}（${Math.round(seconds)} 秒素材）\n`)
+  return { model, format }
+}
+
 function round2(value) { return Math.round(value * 100) / 100 }
 
 function clamp(value, low, high) { return Math.min(high, Math.max(low, value)) }
@@ -113,17 +187,41 @@ export async function motionSeries(path, meta, workDir) {
   const stripW = 384
   const canvasFile = join(workDir, 'canvas.raw')
   const stripFile = join(workDir, 'strip.raw')
+
+  // 软件解码的滤镜图：两路都用 fps=1 之后自己的缩放。
+  const softwareGraph =
+    `[0:v]fps=1,scale=${canvasW}:${canvasH},format=gray[a];`
+    + `[0:v]fps=1,crop=iw:${stripH}:0:0,scale=${stripW}:${Math.max(8, Math.round(stripH / 6))},format=gray[b]`
+
+  // 硬件解码的滤镜图：fps 在 GPU 上跑，只把每秒那一帧下载回内存，
+  // 然后 split 成两路（下载一次，别每路各下一次）。
+  const hardwareGraph =
+    `[0:v]fps=1,hwdownload,format=nv12,split=2[whole][strip];`
+    + `[whole]scale=${canvasW}:${canvasH},format=gray[a];`
+    + `[strip]crop=iw:${stripH}:0:0,scale=${stripW}:${Math.max(8, Math.round(stripH / 6))},format=gray[b]`
+
+  const build = (hw) => [
+    '-hide_banner', '-loglevel', 'error',
+    ...(hw?.model ? ['-hwaccel', hw.model, '-hwaccel_output_format', hw.format] : []),
+    '-i', path,
+    '-filter_complex', hw?.model ? hardwareGraph : softwareGraph,
+    '-map', '[a]', '-f', 'rawvideo', '-pix_fmt', 'gray', '-y', canvasFile,
+    '-map', '[b]', '-f', 'rawvideo', '-pix_fmt', 'gray', '-y', stripFile,
+  ]
+
+  const hardware = await pickHwAccel(ffmpeg, meta.duration)
   let result
   try {
-    result = await run(ffmpeg, [
-      '-hide_banner', '-loglevel', 'error',
-      '-i', path,
-      '-filter_complex',
-      `[0:v]fps=1,scale=${canvasW}:${canvasH},format=gray[a];`
-        + `[0:v]fps=1,crop=iw:${stripH}:0:0,scale=${stripW}:${Math.max(8, Math.round(stripH / 6))},format=gray[b]`,
-      '-map', '[a]', '-f', 'rawvideo', '-pix_fmt', 'gray', '-y', canvasFile,
-      '-map', '[b]', '-f', 'rawvideo', '-pix_fmt', 'gray', '-y', stripFile,
-    ])
+    result = await run(ffmpeg, build(hardware))
+    if (hardware?.model && (result.code !== 0 || !existsSync(canvasFile))) {
+      // GPU 解码在个别编码/驱动组合上会失败（老 VP9、AV1、虚拟显卡等）。
+      // 记住这次失败，整段降级回软件解码，别让用户看到一次失败就整条链路挂掉。
+      process.stderr.write(
+        `[eplan-mcp] 硬件解码不可用，回退软件解码：${result.stderr.trim().slice(0, 160)}\n`,
+      )
+      hwFailed = true
+      result = await run(ffmpeg, build(null))
+    }
   } catch (error) {
     throw fail('VIDEO_NO_FFMPEG', `调用 ffmpeg 失败：${error.message}`)
   }
