@@ -28,7 +28,14 @@ const detailMode = process.argv[2] ?? 'page'
 //   · page_edit 参数形状 + draw/items/type 归一化：5 次调用全撞在字段名上；
 //   · page_inspect +detail（反过来把默认返回砍掉 8.8 KB/次）。
 // 再加东西之前先想清楚能不能等价地砍掉旧说明；预算只许因为「少一次真实调用」而涨。
-const BUDGET = { page: 14800, edit: 12000, check: 7000, lib: 6000, all: 20500 }
+// 2026-11-24 第五次调整（**改成单一预算**）：
+// 工具面不再随模式收口。原来按模式 disable 工具并发 tools/list_changed，切一次模式
+// 系统提示里那段 SDK 声明就变一次 —— ① 前缀变了，整段缓存从顶到底作废；
+// ② 已经在写的程序里 tools.mcp__eplan__workspace 半路变成 unknown tool
+// （session-400917a2 白烧 1.5 分钟 + 一轮返工）。
+// 所以现在五个模式看到的是同一份 12 个工具，预算也只剩一个数。
+// 加东西之前先想清楚能不能等价地砍掉旧说明；预算只许因为「少一次真实调用」而涨。
+const BUDGET = { any: 22500 }
 
 const child = spawn(process.execPath, [serverPath], { stdio: ['pipe', 'pipe', 'inherit'] })
 let buffer = ''
@@ -74,19 +81,28 @@ child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/ini
 
 console.log('模式     字符数   预算   余量  工具')
 let over = 0
+const seen = new Set()
 for (const mode of ['page', 'edit', 'check', 'lib', 'all']) {
   await rpc('tools/call', { name: 'workspace', arguments: { action: 'focus', mode } })
   const listed = await rpc('tools/list', {})
   const tools = listed.result?.tools ?? []
   const chars = tools.reduce((sum, tool) => sum + JSON.stringify(tool).length, 0)
-  const budget = BUDGET[mode]
+  const budget = BUDGET.any
   const slack = budget - chars
   if (slack < 0) over += 1
+  seen.add(tools.map((tool) => tool.name).join(','))
   console.log(
     `${mode.padEnd(6)} ${String(chars).padStart(7)} ${String(budget).padStart(6)} ${String(slack).padStart(6)}  ${tools
       .map((tool) => tool.name)
       .join(',')}`,
   )
+}
+// 模式之间必须一字不差：任何差异都会让系统提示前缀变化、缓存作废。
+if (seen.size !== 1) {
+  console.log(`\n✗ 五个模式的工具面不一致：${seen.size} 种`)
+  over += 1
+} else {
+  console.log(`\n✓ 五个模式工具面一致（${[...seen][0].split(',').length} 个工具）`)
 }
 
 await rpc('tools/call', { name: 'workspace', arguments: { action: 'focus', mode: detailMode } })

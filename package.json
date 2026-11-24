@@ -1,6 +1,6 @@
 {
   "name": "dsh-eplan",
-  "version": "0.13.0",
+  "version": "0.13.1",
   "private": true,
   "description": "EPLAN Electric P8 drawing automation for DeepSeek Harness: an eplan preset whose only direct tool is run_code, 12 mcp__eplan__* tools that create pages, place symbols, draw and validate schematics, plus a video digest plugin that turns a screen recording into staged full-page frames.",
   "type": "module",

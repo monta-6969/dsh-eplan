@@ -118,13 +118,13 @@ echo '{"id":1,"op":"diagnose","args":{}}' | bridge\bin\EplanBridge.exe
 
 | 工具 | 作用 | 是否改图 |
 |---|---|---|
-| `workspace` | `action="brief"` 一次拿全环境 / `focus` 收口工具面 / `list_pages` 列页 / `launch` 拉起 EPLAN（工作目录与等 Remoting 都处理好了）/ `open_project` / `create_project` / `open_page` / `present` 切页出图 / `wait` 等 present job / `plan_get`/`plan_put` 台账 / `claim`/`release` 占位 | 否 |
+| `workspace` | `action="brief"` 一次拿全环境 / `focus` 选当前模式**推荐**哪几个工具（工具面固定 12 个，不按模式裁剪）/ `list_pages` 列页 / `launch` 拉起 EPLAN（工作目录与等 Remoting 都处理好了）/ `open_project` / `create_project` / `open_page` / `present` 切页出图 / `wait` 等 present job / `plan_get`/`plan_put` 台账 / `claim`/`release` 占位 | 否 |
 | `symbol_catalog` | `action=search` 查符号库（中文概念也行）/ `pins` 查每个变体的引脚坐标与朝向 / `visual` 把几个符号真画到临时页上渲一张图认形状 / `lookup` 查工程语义 / `annotate` 写回语义 | 否（`annotate` 只改知识库；`visual` 会建一张临时页再删掉） |
 | `page_create` | **新建页并一次摆完整页**：`layout` 给行列、`nodes` 给元件、`texts` 给标注，`reveal=true` 自动出图 | **是** |
-| `page_edit` | `action=insert_symbol` 补元件 / `set_properties` 读写属性 / `relocate` 挪一个对象 / `relabel` 改设备标识 / `delete_placement` 删一个对象 / `draw_graphics` 画纯图形（可上色）/ `box` 画黑箱（黄框 + 连接点） | **是** |
+| `page_edit` | `action=insert_symbol` 补元件 / `set_properties` 读写属性 / `relocate` 挪一个对象 / `relabel` 改设备标识 / `delete_placement` 删一个对象 / `draw_graphics` 画纯图形（可上色）/ `box` 画黑箱（黄框 + 连接点）；`ops:[{...}]` 一次提交多步（中途失败即停） | **是** |
 | `page_delete` | 删整页（清理过程页），支持 `dryRun` | **是** |
 | `page_inspect` | `format=structure` 倒出对象/坐标/引脚，`image` 让 EPLAN 渲染成图**直接返回图片**，`both` 两样都要 | 否 |
-| `validate` | 查手绘假导线、设备标识重复、元件不在栅格、孤立引脚 | 否 |
+| `validate` | 查手绘假导线、设备标识重复、元件不在栅格、孤立引脚；`appearance` 一节给版面数字（分组、组间空隙、同列间距、四边余量） | 否 |
 | `export` | 导出 PNG / PDF / DXF；大项目用 `wait:false` 先拿 jobId，`workspace(action="wait")` 收文件清单 | 否 |
 | `manual` | 把 PDF 手册页面渲染成图给你看（`outline` / `search` / `render`） | 否 |
 | `operation_history` | 查真实发生过的写操作，含前后状态与能否回退 | 否 |
@@ -366,6 +366,27 @@ node test\raw-smoke.mjs
 ```
 
 `verify-bootstrap.ps1` 用的是从 `EplanEplApiScriptLogu.erx` 里逐字抄出来的引用集，**和 EPLAN 实际编译脚本时一模一样**。它报错，EPLAN 里一定也报错；改脚本后先跑它，能省掉反复进 EPLAN 试的时间。
+
+不碰 EPLAN 就能跑的那一批（改完任意一侧都该全绿）：
+
+| 脚本 | 测什么 |
+|---|---|
+| `test\present-offline.mjs` | present/export 的 job 化、占用门、**五个模式工具面完全一致** |
+| `test\tool-face.mjs` | 工具面预算（单一预算 22.5k；模式之间一字不差，前缀才不会被打破） |
+| `test\video-cache.mjs` | 录屏摘要缓存：第二次调用不重新解码，`at` 只取一张图 |
+| `test\video-decode.mjs` | 硬件解码与软件解码采样逐点相同 |
+| `test\video-offline.mjs` | 摘要正文结构 + 缓存命中时只回一张图 |
+| `test\appearance-offline.mjs` | 版面看相：分组、组间空隙、同列间距、四类问题 |
+| `test\fuzzy-offline.mjs` | 符号名写错时的候选（DCP → DCPL） |
+| `test\page-edit-args.mjs` | `page_edit` 同一个 `to` 的两种含义（标识字符串 / 坐标） |
+| `test\compact-offline.mjs` | `page_inspect` 载荷三档体积与几何问题 |
+| `test\image-budget.mjs` | 一步最多 8 张图的配额 |
+| `test\measure-offline.mjs` | 像素→毫米标定与找线 |
+| `test\offline-guidance.mjs` / `nudge-offline.mjs` / `notes-offline.mjs` / `preferences-offline.mjs` | 提示词与经验库的行为契约 |
+| `test\arg-shape.mjs` / `prompt-budget.mjs` / `restrict-tools.test.mjs` / `idempotent-offline.mjs` | 参数形状、人设预算、工具遮罩、幂等性 |
+| `test\check-docs.mjs` | 文档与代码一致（工具数、示例命令） |
+
+`test\_smoke-live.mjs` 和 `test\smoke-all.mjs` 要 EPLAN 在运行且**没有模态框挡着**——被挡住时它们会超时，那不是回归。
 
 ---
 

@@ -148,11 +148,16 @@ for (const mode of ['page', 'edit', 'check', 'lib', 'all']) {
   faces[mode] = await face(mode)
   console.log(`  ${mode.padEnd(5)} ${String(faces[mode].chars).padStart(6)}  ${faces[mode].names.join(',')}`)
 }
-// focus 现在只补「本模式必填参数」，不再按模式裁工具面：PTC 下 12 个工具都是
-// 程序里的绑定，遮掉哪个都会让照着提示词写出来的程序当场报错。
-check('page 模式工具面 ≤ 14800', faces.page.chars <= 14800, `${faces.page.chars} 字符`)
+// 工具面**不随模式变化**（2026-11-24 session-400917a2 的教训：切一次模式，
+// run_code 的 SDK 声明就变一次 —— 系统提示前缀作废、正在写的程序里工具变 unknown）。
+// 所以这里断言的不是「越小越好」，而是「五个模式完全一样」。
+const faceChars = new Set(Object.values(faces).map((item) => item.chars))
+const faceNames = new Set(Object.values(faces).map((item) => item.names.join(',')))
+check('五个模式的工具面完全一致', faceChars.size === 1 && faceNames.size === 1, [...faceChars].join(' / '))
 check('page 模式含 workspace', faces.page.names.includes('workspace'))
 check('page 模式含 page_edit', faces.page.names.includes('page_edit'))
+check('page 模式也含 page_delete（不再要切模式去拿它）', faces.page.names.includes('page_delete'))
+check('工具面规模仍然可控（≤ 24000 字符）', faces.page.chars <= 24000, `${faces.page.chars} 字符`)
 
 // 行为测试要用全部工具。
 await callRaw('workspace', { action: 'focus', mode: 'all' })

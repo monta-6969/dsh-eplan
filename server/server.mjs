@@ -17,7 +17,8 @@ import { fileURLToPath } from 'node:url'
 import { randomUUID } from 'node:crypto'
 import z from 'zod'
 // 载荷收敛层：只改「回给模型的形状」，不碰任何 EPLAN 行为。
-import { compactInspect, geometryProblems, digest, RepeatMemo } from './compact.mjs'
+import { compactInspect, geometryProblems, appearanceReport, digest, RepeatMemo } from './compact.mjs'
+import { closestSymbolNames } from './fuzzy.mjs'
 import { normalizeEditArgs } from './edit-args.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -753,7 +754,7 @@ function ok(result) {
   return { content: [{ type: 'text', text: JSON.stringify(result) }] }
 }
 
-function failed(op, error) {
+function failed(op, error, note = null) {
   return {
     isError: true,
     content: [
@@ -766,9 +767,61 @@ function failed(op, error) {
           code: error.code ?? 'UNKNOWN',
           message: error.message,
           ...(error.detail === undefined ? {} : { detail: error.detail }),
+          ...(note ?? {}),
         }),
       },
     ],
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 同参数同错误第二次就明说「别再试了，换这个做法」。
+//
+// 2026-11-24 session-400917a2：同一个不存在的符号连撞 8 次，每次 300 ms、外加一整轮
+// 重新规划。重试本身不贵，贵的是它每次都以为「这次也许行」。这段不改错误、不加限制，
+// 只是把「你已经在这条死路上」说出来，并给出下一步该做什么。
+// ---------------------------------------------------------------------------
+const REPEAT_WINDOW_MS = 5 * 60 * 1000
+const repeatTally = new Map()
+
+const REPEAT_ADVICE = {
+  OBJECT_NOT_FOUND:
+    '对象不在了或标识变了：先 page_inspect{format:"structure", view:"list"} 取当前的 objectId / deviceTag 再动。'
+    + '整页删掉重建过之后，旧标识一定失效。',
+  SYMBOL_NOT_FOUND:
+    '这个名字在库里不存在，重试同一个名字不会有不同结果：改用错误里给的 candidates，'
+    + '或 symbol_catalog{action:"visual"} 把候选画出来用眼睛认。',
+  PAGE_EXISTS: '页已经存在：换一个页号，或直接在这页上 page_edit —— 不要再 create 同一个名字。',
+  EPLAN_BLOCKED_BY_DIALOG:
+    '框还压着 EPLAN，所有调用都会被挡回来：让用户切过去关掉（或按 Esc），回一句再继续。不要自己重试。',
+  BAD_ARGUMENT: '参数形状不对，照错误里给的例子重写一次，不要在原参数上小改后再试。',
+  PLACEMENT_NOT_FOUND: '页面上没有这个对象：先 page_inspect view="list"，别凭记忆写 id。',
+  UNKNOWN_OP: '宿主不认识这个操作：EPLAN 里加载的是旧宿主，只能等 EPLAN 重启后再用。',
+}
+
+function repeatNote(op, args, error) {
+  const code = error.code ?? 'UNKNOWN'
+  let key
+  try {
+    key = `${op}|${JSON.stringify(args ?? null)}`
+  } catch {
+    key = `${op}|?`
+  }
+  const now = Date.now()
+  const prev = repeatTally.get(key)
+  const same = prev && prev.code === code && now - prev.at < REPEAT_WINDOW_MS
+  const count = same ? prev.count + 1 : 1
+  repeatTally.set(key, { code, count, at: now })
+  if (repeatTally.size > 200) {
+    for (const [oldKey, row] of repeatTally) {
+      if (now - row.at > REPEAT_WINDOW_MS) repeatTally.delete(oldKey)
+    }
+  }
+  if (count < 2) return null
+  return {
+    repeat: count,
+    stopRetrying: true,
+    nextStep: REPEAT_ADVICE[code] ?? '换个做法：先用 page_inspect / status 看清现场，再决定改哪一步。',
   }
 }
 
@@ -776,7 +829,7 @@ async function invoke(op, args) {
   try {
     return ok(await callBridge(op, args))
   } catch (error) {
-    return failed(op, error)
+    return failed(op, error, repeatNote(op, args, error))
   }
 }
 
@@ -983,7 +1036,7 @@ async function invokeWrite(op, args) {
     }
     return { content: blocks }
   } catch (error) {
-    return failed(op, error)
+    return failed(op, error, repeatNote(op, args, error))
   }
 }
 
@@ -1518,30 +1571,27 @@ function applyFocus(mode) {
     )
   }
 
-  const target = spec === null
-    ? new Set(toolHandles.keys())
-    // workspace 永远留着：它是切模式的入口，也是状态查询口。
-    : new Set(['workspace', ...spec.tools])
-
-  const active = []
-  const disabled = []
-  for (const [name, handle] of toolHandles) {
-    if (target.has(name)) {
-      handle.enable?.()
-      active.push(name)
-    } else {
-      handle.disable?.()
-      disabled.push(name)
-    }
-  }
-  server.sendToolListChanged?.()
+  // 工具面**不再随模式增删**（2026-11-24 session-400917a2 的教训）。
+  //
+  // 原来这里按模式 disable 工具并发 tools/list_changed：切一次模式，run_code 的 SDK
+  // 声明就变一次 —— ① 系统提示的前缀变了，整段缓存从顶到底作废；② 已经在写的程序
+  // 里 tools.mcp__eplan__workspace 变成 unknown tool / is not a function 半路夭折
+  // （那次白烧 1.5 分钟 + 一轮返工）。全开的代价只是提示词多 2 KB（19.5→21.5 KB），
+  // 换来的是一段全程不变的稳定前缀。
+  //
+  // 模式仍然有用：它决定推荐用哪几个、给哪些必填参数和规则。只是不再限制可达性。
+  const all = [...toolHandles.keys()]
+  for (const [, handle] of toolHandles) handle.enable?.()
+  const recommended = spec === null ? all : ['workspace', ...spec.tools]
   currentMode = mode
 
   const payload = {
     mode,
     title: spec === null ? '全部工具' : spec.title,
-    active,
-    disabled,
+    active: all,
+    recommended,
+    disabled: [],
+    alwaysAvailable: true,
   }
   if (spec !== null) {
     payload.skills = spec.skills.map((name) => join(SKILL_ROOT, name, 'SKILL.md'))
@@ -1559,7 +1609,8 @@ function applyFocus(mode) {
     payload.galleryNote = '后面按 gallery 的顺序逐张给图（EPLAN 真渲染，暗色主题，红色是自动连接线）。'
   }
   payload.note =
-    '工具面已按这个模式收口：disabled 里的工具现在既不在 tools/list 里，也不在 run_code 的 SDK 声明里。' +
+    '工具面固定在 12 个（disabled 永远为空，run_code 的 SDK 声明也不再随模式变化）：' +
+    'recommended 是这个模式最该先用的几个，其余照样能调，不用为了「换个模式」去切 focus。' +
     '换模式用 workspace action="focus" mode=page|edit|check|lib|all。'
   return payload
 }
@@ -1653,13 +1704,34 @@ async function briefResult(args = {}) {
 // 重复提交拿回同一个 jobId，不会排成两条。
 // ---------------------------------------------------------------------------
 const JOB_KEEP_MS = 15 * 60 * 1000
+// 同一个页最近一次「被对话框挡住 / 主线程没回话」的时刻。
+// 90 秒内不再重发同一个 present：连撞三次的代价是 80 秒 + 三圈模型回合。
+const STUCK_COOLDOWN_MS = 90 * 1000
+const recentStuck = new Map()
 const jobs = new Map()
 let jobSeq = 0
+
+function markStuck(key) {
+  if (key) recentStuck.set(key, Date.now())
+}
+
+function stuckRecently(key) {
+  const at = recentStuck.get(key)
+  if (!at) return false
+  if (Date.now() - at > STUCK_COOLDOWN_MS) {
+    recentStuck.delete(key)
+    return false
+  }
+  return true
+}
 
 function gcJobs(now = Date.now()) {
   for (const [id, job] of jobs) {
     const endedAt = job.finishedAt ?? job.startedAt
     if (now - endedAt > JOB_KEEP_MS) jobs.delete(id)
+  }
+  for (const [key, at] of recentStuck) {
+    if (now - at > STUCK_COOLDOWN_MS) recentStuck.delete(key)
   }
 }
 
@@ -1721,12 +1793,14 @@ async function presentOnce({ page, project, width, theme }) {
     opened = { ...opened, lookError: error.message }
   }
   const blocked = opened && opened.ok === false && opened.code === 'EPLAN_BLOCKED_BY_DIALOG'
+  if (blocked) markStuck(`${project ?? ''}|${page}`)
   return {
     page,
     project,
     opened,
     visible: opened?.visibleInTitle === true || opened?.focusRequested === true,
     ...(shot ? { imagePath: shot.imagePath, counts: shot.counts, theme, renderMs: shot.renderMs } : {}),
+    ...(blocked ? { blocked: true } : {}),
     ...(blocked
       ? {
           hint: 'EPLAN 正停在模态框或交互命令里，这次切页没有生效。让用户按 Esc 关掉后再说一声；不要连续重试 open_page。图已经渲好，可以先看图确认内容。',
@@ -1736,9 +1810,33 @@ async function presentOnce({ page, project, width, theme }) {
 }
 
 function startPresent({ page, project, width, theme }) {
+  const key = `${project ?? ''}|${page}`
+  // 熔断：刚被挡过就别再发。返回一个「已失败」的 job，形状和其他 job 一样，
+  // 模型看到的是同一套字段 + 一句「先让用户关框」，不会以为这是新任务。
+  if (stuckRecently(key)) {
+    const now = Date.now()
+    const job = {
+      id: `present-${++jobSeq}`,
+      kind: 'present',
+      key,
+      page: page ?? null,
+      project: project ?? null,
+      state: 'failed',
+      startedAt: now,
+      finishedAt: now,
+      blocked: true,
+      error: {
+        code: 'EPLAN_BLOCKED_BY_DIALOG',
+        message: `上一次给「${page}」切页时被 EPLAN 的对话框挡住了，${Math.round(STUCK_COOLDOWN_MS / 1000)} 秒内不再重发。`,
+        detail: '这次什么都没做。让用户切到 EPLAN 把框关掉（或按 Esc），回一句后再继续；不要换个参数绕过。',
+      },
+    }
+    jobs.set(job.id, job)
+    return { job, reused: true }
+  }
   return startJob({
     kind: 'present',
-    key: `${project ?? ''}|${page}`,
+    key,
     page,
     project,
     run: () => presentOnce({ page, project, width, theme }),
@@ -1769,6 +1867,16 @@ function jobPayload(job, extra = {}) {
     return { ...base, error: job.error, hint: '这一任务失败了。EPLAN 被对话框挡住时先让用户按 Esc，不要连续重试。' }
   }
   if (job.state === 'running') {
+    if (job.unresponsive) {
+      return {
+        ...base,
+        epanUnresponsive: true,
+        hint:
+          'EPLAN 主线程没回话（2 秒探针超时）：几乎可以断定正压着一个模态框。'
+          + '别再 wait、也别重发同一个任务 —— 让用户切到 EPLAN 按 Esc 或点掉那个框，回一句后再继续。'
+          + '这一步没有任何东西被改坏，页面内容以最近一次渲染图为准。',
+      }
+    }
     return {
       ...base,
       hint: `还在跑（${Math.round(base.elapsedMs / 1000)} 秒）。稍后用 workspace({action:"wait", jobId:"${job.id}"}) 取结果；等的期间可以干别的，别重复提交同一个任务。`,
@@ -1787,10 +1895,39 @@ function jobBlocks(job, extra) {
   return { content: blocks }
 }
 
+/**
+ * EPLAN 主线程还答不答话。
+ *
+ * 模态框（含 EPLAN 自己的「硬件错误/存储器访问受阻」）会占住主线程，这时候连 status
+ * 都回不来。用 2 秒的探针，不是用来杀任务，只用来**提前收摊**：
+ * 2026-11-24 session-400917a2 里 present 卡在对话框后面，模型连 wait 三次，
+ * 每次干等 25 秒（t4/5→t4/7 白烧 80 秒）。探针把「是不是卡住了」变成 2 秒内可知。
+ */
+async function eplanUnresponsive() {
+  try {
+    await callBridge('status', {}, { timeoutMs: 2000 })
+    return false
+  } catch {
+    return true
+  }
+}
+
 async function settleJob(job, timeoutMs) {
-  const deadline = Date.now() + timeoutMs
+  const startedAt = Date.now()
+  const deadline = startedAt + timeoutMs
+  let probed = false
   while (job.state === 'running' && Date.now() < deadline) {
     await new Promise((resolveWait) => setTimeout(resolveWait, 250))
+    // 10 秒还没完就先探一次：跑得慢和卡死了是两件事，不能都让调用方干等。
+    // （一次正常渲染是 1~3 秒；10 秒还在跑，多半是撞上了模态框。）
+    if (!probed && Date.now() - startedAt > 10000 && job.state === 'running') {
+      probed = true
+      if (await eplanUnresponsive()) {
+        job.unresponsive = true
+        if (job.kind === 'present') markStuck(job.key)
+        break
+      }
+    }
   }
   return job
 }
@@ -2601,6 +2738,63 @@ regTool(
   },
 )
 
+// ---------------------------------------------------------------------------
+// 符号名写错时给候选。
+//
+// 2026-11-24 session-400917a2：模型认定「DCP」是电抗器，连撞 8 次 SYMBOL_NOT_FOUND，
+// 每次 260~370 ms，外加一整轮重新规划。错的不是重试次数，是错误信息只说「没有」，
+// 不说「库里有这些」。给候选 = 把一次失败变成一次可用的纠正。
+// ---------------------------------------------------------------------------
+const symbolNameCache = new Map()
+
+/** 符号库全量名字（带缓存）。取不满就不缓存 —— 截断的名单会给出误导性的候选。 */
+async function symbolNameIndex(project, library) {
+  const key = `${project ?? ''}|${library ?? ''}`
+  const hit = symbolNameCache.get(key)
+  if (hit) return hit
+  try {
+    const res = await callBridge('symbols', { project, library, limit: 2000 })
+    const names = (Array.isArray(res?.symbols) ? res.symbols : []).map((item) => item?.name).filter(Boolean)
+    const total = Number.isFinite(res?.totalSymbols) ? res.totalSymbols : null
+    if (names.length > 0 && (total === null || names.length >= Math.min(total, 2000))) {
+      symbolNameCache.set(key, names)
+    }
+    return names
+  } catch {
+    return []
+  }
+}
+
+/** 把「库里没有 X」补成「库里没有 X，最接近的是 A / B」。 */
+async function symbolHint(result, symbol, library, project) {
+  if (result?.isError !== true) return result
+  try {
+    const block = result.content?.find?.((item) => item.type === 'text')
+    if (!block) return result
+    const payload = JSON.parse(block.text)
+    if (payload?.code !== 'SYMBOL_NOT_FOUND') return result
+    const names = await symbolNameIndex(project, library)
+    const candidates = closestSymbolNames(symbol, names)
+    payload.candidates = candidates
+    if (candidates.length > 0) {
+      payload.message = `${payload.message} 库里有相近的名字：${candidates.join(' / ')}。改用其中之一，或先 pins 确认引脚。`
+      payload.detail = '这些是编辑距离最近的几个，不是语义匹配 —— 形状对不对还要看 pins 或 visual。'
+      payload.hint = '先 symbol_catalog{action:"pins",symbols:[候选]} 核引脚，再插；不要重复提交同一个不存在的名字。'
+    } else if (names.length > 0) {
+      payload.message = `${payload.message}（库里 ${names.length} 个符号里没有名字相近的。）`
+      payload.detail =
+        `「${symbol}」可能压根不叫这个名字，或属于别的符号库。`
+        + '下一步：symbol_catalog{action:"search", filter:"<英文缩写>"} 找名字，'
+        + '或 action:"visual" 把候选画出来用眼睛认（一次调用）。'
+      payload.hint = '不要原样重试这一个名字。'
+    }
+    block.text = JSON.stringify(payload)
+  } catch {
+    // 结构对不上就原样返回，别用「弄坏错误信息」换候选。
+  }
+  return result
+}
+
 regTool(
   'page_edit',
   {
@@ -2653,7 +2847,13 @@ regTool(
         .describe('定位条件，至少给一项（也可落在 page / project 上）'),
       at: point.optional().describe('relocate 的目标坐标 [x, y]，绝对'),
       offset: point.optional().describe('relocate 的相对位移 [dx, dy]，与 at 二选一'),
-      to: z.string().optional().describe('relabel 的新设备标识，例如 "-K2"'),
+      // `to` 在 relabel 里是字符串（新标识），在 box 里是坐标。
+      // 2026-11-24 实测：同一个键两种类型，模型写对了一种就必然错另一种，
+      // 一次 schema 校验失败白丢一个回合。所以这里收 union，按 action 分派。
+      to: z
+        .union([z.string(), point])
+        .optional()
+        .describe('relabel 的新设备标识（字符串，例如 "-K2"）；box 的右下角坐标也可以直接写在这里（[x,y]）'),
       get: z.array(z.string()).optional().describe('set_properties 要读的属性名'),
       set: z.record(z.string(), z.string()).optional().describe('set_properties 要写的属性名与值'),
       // draw_graphics
@@ -2697,9 +2897,103 @@ regTool(
         })
         .optional()
         .describe('box 用；比 draw_graphics 手画矩形再补端子省一半步骤'),
+      // 批量：一次调用提交多步同页操作。
+      // 2026-11-24 实测：一页画下来 51 次 page_edit、平均 705 ms，每次还要一个模型回合
+      // （≈13 秒生成）。同类操作（三个黑箱、十二个中断点）合成一次提交，省的是回合不是毫秒。
+      ops: z
+        .array(z.object({
+          action: z
+            .enum(['insert_symbol', 'set_properties', 'relocate', 'relabel', 'delete_placement', 'draw_graphics', 'box'])
+            .describe('这一步做什么，和单次调用的 action 一样'),
+        }).passthrough())
+        .optional()
+        .describe(
+          '批量模式：一次提交多步，按数组顺序执行，字段规则与单次调用完全相同（page/project 在顶层写一次即可）。'
+          + '中途某步失败就停下并回报全部失败原因 —— 后面几步通常依赖前面插进去的对象。'
+          + '典型用法：三个 box + 十二个 insert_symbol 一次提交。',
+        ),
     }).passthrough(),
   },
-  async (rawArgs) => {
+  pageEditEntry,
+)
+
+/**
+ * page_edit 的入口：批量或单步。
+ *
+ * 原来这里是一个内联箭头函数，插不进批量分派；拆成具名函数之后单步路径一个字没改，
+ * 批量只是把同一套 action 逻辑按顺序喂进去。
+ */
+async function pageEditEntry(rawArgs) {
+  if (Array.isArray(rawArgs?.ops) && rawArgs.ops.length > 0) {
+    return runPageEditBatch(rawArgs)
+  }
+  return runPageEditOnce(rawArgs)
+}
+
+/** 批量：按顺序跑，某步失败就停 —— 后面几步通常依赖前面插进去的对象。 */
+async function runPageEditBatch(rawArgs) {
+  const { ops, ...shared } = rawArgs
+  const results = []
+  for (let index = 0; index < ops.length; index += 1) {
+    const step = { ...shared, ...(ops[index] ?? {}) }
+    delete step.ops
+    let outcome
+    try {
+      outcome = await runPageEditOnce(step)
+    } catch (error) {
+      results.push({
+        index,
+        action: step.action ?? null,
+        ok: false,
+        code: error?.code ?? 'UNKNOWN',
+        error: error?.message ?? String(error),
+      })
+      break
+    }
+    const text = outcome?.content?.find?.((block) => block.type === 'text')?.text
+    let payload = null
+    try {
+      payload = JSON.parse(text)
+    } catch {
+      payload = text ? String(text).slice(0, 200) : null
+    }
+    const failedStep = outcome?.isError === true || payload?.ok === false
+    results.push({
+      index,
+      action: step.action ?? null,
+      ok: !failedStep,
+      ...(failedStep ? { code: payload?.code ?? null, error: payload?.message ?? null, detail: payload?.detail ?? null } : {}),
+      ...(failedStep ? {} : { summary: summarizeEdit(payload) }),
+    })
+    if (failedStep) break
+  }
+  const done = results.filter((item) => item.ok).length
+  const stopped = results.length < ops.length
+  return ok({
+    ok: results.every((item) => item.ok),
+    mode: 'batch',
+    total: ops.length,
+    done,
+    stoppedEarly: stopped,
+    results,
+    ...(stopped
+      ? { hint: '停在第一个失败处，后面的步骤没有执行。改掉那一步再提交剩下的（已完成的不要重做）。' }
+      : {}),
+  })
+}
+
+/** 批量结果里每步只留一句能核对的摘要，别把 8 份完整返回全塞回上下文。 */
+function summarizeEdit(payload) {
+  if (!payload || typeof payload !== 'object') return null
+  const keep = ['ok', 'page', 'op', 'symbol', 'library', 'variant', 'deviceTag', 'at', 'from', 'to', 'inserted', 'connections', 'objects']
+  const out = {}
+  for (const key of keep) {
+    if (payload[key] !== undefined) out[key] = payload[key]
+  }
+  return Object.keys(out).length > 0 ? out : null
+}
+
+async function runPageEditOnce(rawArgs) {
     // 先把同义写法收敛（draw/items/rects、type/kind、to/at…），再走后面的分支。
     const args = normalizeEditArgs(rawArgs)
     // 写操作前先过占用门：同一页正被另一个会话改时直接挡回去。
@@ -2717,18 +3011,19 @@ regTool(
         const symbolName = spec.symbol ?? (typeof args.symbol === 'string' ? args.symbol : undefined)
         const at = spec.at ?? args.at
         need({ page: args.page, symbol: symbolName, at }, ['page', 'symbol', 'at'], 'insert_symbol')
+        const written = await invokeWrite('symbol_insert', {
+          project: args.project,
+          page: args.page,
+          library: spec.library ?? args.library,
+          symbol: symbolName,
+          variant: spec.variant ?? args.variant,
+          at,
+          deviceTag: spec.deviceTag ?? args.deviceTag,
+          props: spec.props ?? args.props,
+          dryRun: args.dryRun,
+        })
         return withNote(
-          await invokeWrite('symbol_insert', {
-            project: args.project,
-            page: args.page,
-            library: spec.library ?? args.library,
-            symbol: symbolName,
-            variant: spec.variant ?? args.variant,
-            at,
-            deviceTag: spec.deviceTag ?? args.deviceTag,
-            props: spec.props ?? args.props,
-            dryRun: args.dryRun,
-          }),
+          await symbolHint(written, symbolName, spec.library ?? args.library, args.project),
           guardNote(),
         )
       }
@@ -2774,6 +3069,13 @@ regTool(
         }
         if (args.action === 'relabel') {
           need({ to: args.to }, ['to'], 'relabel')
+          if (typeof args.to !== 'string') {
+            throw fail(
+              'BAD_ARGUMENT',
+              `relabel 的 to 要的是字符串设备标识，收到的是 ${JSON.stringify(args.to)}。`,
+              '写成 to:"-K2"。坐标用 at:[x,y]（relocate）；box 的右下角才写 [x,y]。',
+            )
+          }
           return withNote(
             hostOutdated(
               await invoke('placement_relabel', { selector, to: args.to, dryRun: args.dryRun }),
@@ -2858,8 +3160,7 @@ regTool(
             '改一个已存在的对象（挪位置 / 改标识 / 删）用 relocate / relabel / delete_placement，别删整页重建。',
         )
     }
-  },
-)
+}
 
 regTool(
   'page_delete',
@@ -3019,7 +3320,9 @@ regTool(
       '检查一页画得规不规范，并给出**能不能交付**的结论。EPLAN 不会因为画错而报错，所以交付前必须跑一次。\n' +
       'verdict 为 "pass" 才能交；"warn" 只有可读性问题（标签压字、设备标识重复）；"fail" 有硬伤，必须改。\n' +
       '检查两部分：EPLAN 自己的（手绘假导线、设备标识重复、不在栅格、孤立引脚、共用连接点）' +
-      '和几何的（符号本体重叠、文字压符号、超图框）。两条都过才算过。',
+      '和几何的（符号本体重叠、文字压符号、超图框）。两条都过才算过。\n' +
+      'appearance 是版面看相：按邻近关系分组，量组间空隙、同列间距、四边余量，' +
+      '用户说「散 / 挤 / 丑 / 聚拢一点 / 线修长一点」时照它的 issues 改，不要整页重画（它不进 verdict）。',
     inputSchema: z.object({
       project,
       page: z.string().describe('要检查的页名'),
@@ -3091,6 +3394,10 @@ regTool(
     const errors = [...(host?.problems ?? []), ...geometryErrors.map(formatGeometry)]
     const warnings = [...(host?.warnings ?? []), ...geometryWarnings.map(formatGeometry)]
 
+    // 看相：只给数字和建议，不进 errors/warnings —— 审美不是硬伤，
+    // 但用户说「散 / 挤 / 丑」的时候，这里就是唯一能照做的依据。
+    const appearance = raw === null ? null : appearanceReport(raw, { pageSize })
+
     // 意图层：器件清单是不是齐的。这是机器能判的部分，不该让模型靠看渲染图数数。
     let intent = null
     if (Array.isArray(args.expectDevices) && args.expectDevices.length > 0) {
@@ -3142,6 +3449,22 @@ regTool(
       warnings,
       info: host?.info ?? [],
       ...(geometry.length > 0 ? { geometry: geometry.slice(0, 20) } : {}),
+      ...(appearance && appearance.items > 0
+        ? {
+            appearance: {
+              items: appearance.items,
+              groups: appearance.groups,
+              gaps: appearance.gaps ?? [],
+              pitches: appearance.pitches ?? null,
+              ...(appearance.margins ? { margins: appearance.margins } : {}),
+              ...(appearance.issues?.length ? { issues: appearance.issues } : { issues: [] }),
+              note:
+                appearance.issues?.length
+                  ? '这些是版面观感问题，不影响能不能交付；用户说「散 / 挤 / 丑」时按 issues 里的 fix 改，别整页重画。'
+                  : null,
+            },
+          }
+        : {}),
       ...(host?.offGridSample?.length ? { offGridSample: host.offGridSample.slice(0, 8) } : {}),
       ...(host?.duplicateTags?.length ? { duplicateTags: host.duplicateTags } : {}),
       ...(hostError ? { hostError } : {}),

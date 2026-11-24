@@ -447,6 +447,168 @@ function inspectFull(raw, options) {
  * @param {object} raw 桥接器原始 JSON
  * @param {{view?: string, only?: string[], limit?: number}} options
  */
+/**
+ * 「看相」：把用户嘴里的「散」「挤」「丑」翻译成可核对的数字。
+ *
+ * 2026-11-24 session-400917a2：5 条用户消息里有 4 条是审美返工
+ * （画丑了 / 线修长一点 / 组聚拢一点 / 呈现错页），第 3、4 轮 9.1 分钟 = 全程 38%
+ * 全花在这里。返工的根因不是不会画，是**没人告诉它哪里散**：
+ * validate 只答「对不对」，不答「好不好看」。
+ *
+ * 这一段只做几何实测：把元件按邻近关系分组，量组内包围盒、组间空隙、同列相邻间距，
+ * 给出一组数字和一句能照做的改法。**不进 errors/warnings**，因为审美不是硬伤；
+ * 它作为 advisory 附在 validate 结果里，用户说「散」的时候有据可依。
+ */
+export function appearanceReport(raw, { gapJoin = 24, pageSize = null } = {}) {
+  const placements = Array.isArray(raw?.placements) ? raw.placements : []
+  const items = []
+  for (const item of placements) {
+    if (item?.type !== 'Function') continue
+    const box = bboxOf(footprintOf(item))
+    if (!box) continue
+    items.push({ name: item.symbolName ?? '(匿名)', tag: item.name ?? null, box })
+  }
+  if (items.length === 0) return { groups: 0, items: 0, issues: [] }
+
+  // 并查集：包围盒之间的边距小于 gapJoin 就并成一组（「相关联的一组」）。
+  const parent = items.map((_, index) => index)
+  const find = (index) => (parent[index] === index ? index : (parent[index] = find(parent[index])))
+  const union = (a, b) => {
+    const ra = find(a)
+    const rb = find(b)
+    if (ra !== rb) parent[rb] = ra
+  }
+  const gapBetween = (a, b) => {
+    const dx = Math.max(0, Math.max(a.minX - b.maxX, b.minX - a.maxX))
+    const dy = Math.max(0, Math.max(a.minY - b.maxY, b.minY - a.maxY))
+    return Math.hypot(dx, dy)
+  }
+  for (let i = 0; i < items.length; i += 1) {
+    for (let j = i + 1; j < items.length; j += 1) {
+      if (gapBetween(items[i].box, items[j].box) <= gapJoin) union(i, j)
+    }
+  }
+
+  const buckets = new Map()
+  for (let index = 0; index < items.length; index += 1) {
+    const root = find(index)
+    const bucket = buckets.get(root) ?? []
+    bucket.push(items[index])
+    buckets.set(root, bucket)
+  }
+  const groups = [...buckets.values()]
+    .map((members, index) => ({
+      index: index + 1,
+      items: members.length,
+      tags: members.map((member) => member.tag).filter(Boolean).slice(0, 8),
+      bbox: members.reduce(
+        (acc, member) => ({
+          minX: Math.min(acc.minX, member.box.minX),
+          minY: Math.min(acc.minY, member.box.minY),
+          maxX: Math.max(acc.maxX, member.box.maxX),
+          maxY: Math.max(acc.maxY, member.box.maxY),
+        }),
+        { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity },
+      ),
+    }))
+    .sort((a, b) => a.bbox.minX - b.bbox.minX || b.bbox.maxY - a.bbox.maxY)
+
+  const issues = []
+  const gaps = []
+  for (let i = 0; i < groups.length; i += 1) {
+    for (let j = i + 1; j < groups.length; j += 1) {
+      gaps.push(round(gapBetween(groups[i].bbox, groups[j].bbox)))
+    }
+  }
+
+  // 「挤」= 任意两个元件之间几乎没有余量。注意这里必须逐元件量：
+  // 分组本身是「间隔小于 24 就并成一组」，组与组之间永远 ≥ 24，拿组去量永远量不出挤。
+  for (let i = 0; i < items.length; i += 1) {
+    for (let j = i + 1; j < items.length; j += 1) {
+      const gap = gapBetween(items[i].box, items[j].box)
+      if (gap >= 4) continue
+      issues.push({
+        kind: 'group_crowded',
+        where: `${items[i].name} ∩ ${items[j].name}`,
+        detail: `两个元件之间只剩 ${round(gap)} mm，设备标识和引脚代号会互相压字。`,
+        fix: '把其中一个按栅格挪开，至少留出标签宽度（一般 10 mm 以上）。',
+      })
+    }
+  }
+
+  // 同列的「线」有多长：量相邻元件的**中心间距**，不是量空隙 ——
+  // 引脚各占 4 mm，元件贴在一起时空隙是 0，但它照样是「线太短」的那条线。
+  const columns = new Map()
+  for (const item of items) {
+    const key = Math.round(item.box.minX / 4) * 4
+    const bucket = columns.get(key) ?? []
+    bucket.push(item)
+    columns.set(key, bucket)
+  }
+  const pitches = []
+  for (const bucket of columns.values()) {
+    if (bucket.length < 2) continue
+    const sorted = [...bucket].sort((a, b) => a.box.minY - b.box.minY)
+    for (let index = 1; index < sorted.length; index += 1) {
+      const pitch = sorted[index].box.minY - sorted[index - 1].box.minY
+      if (Number.isFinite(pitch) && pitch > 0) pitches.push(round(pitch))
+    }
+  }
+  pitches.sort((a, b) => a - b)
+  const median = (list) => (list.length === 0 ? null : list[Math.floor(list.length / 2)])
+  const medianPitch = median(pitches)
+  if (medianPitch !== null && medianPitch < 12 && pitches.length >= 3) {
+    issues.push({
+      kind: 'short_wires',
+      where: `${pitches.length} 处竖向相邻`,
+      detail: `同列相邻元件的中位中心间距只有 ${medianPitch} mm，连出来的线是短桩，看着挤。`,
+      fix: '把这一列整体拉开（行间距各加 8~12 mm），引脚仍然同轴就不会丢红线。',
+    })
+  }
+
+  const gapList = [...new Set(gaps)].sort((a, b) => a - b)
+  const medianGap = median(gapList)
+  if (gapList.length > 0 && medianGap !== null && medianGap > 60) {
+    issues.push({
+      kind: 'groups_scattered',
+      where: `${groups.length} 组之间`,
+      detail: `组间空隙中位数 ${medianGap} mm，页面上大片空白——这就是「散」。`,
+      fix: '把外围的组往主轴收 20~40 mm，先保证同组内聚，再保证组与组之间留一条等宽的走廊。',
+    })
+  }
+
+  // 版面余量只给数字，不判对错：EPLAN 的图纸大多从左上角画起，
+  // 右下留白是常态，拿它当问题只会让模型对着一张合格的图改个不停。
+  let margins = null
+  if (Array.isArray(pageSize) && pageSize.length >= 2) {
+    const content = groups.reduce(
+      (acc, group) => ({
+        minX: Math.min(acc.minX, group.bbox.minX),
+        minY: Math.min(acc.minY, group.bbox.minY),
+        maxX: Math.max(acc.maxX, group.bbox.maxX),
+        maxY: Math.max(acc.maxY, group.bbox.maxY),
+      }),
+      { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity },
+    )
+    margins = {
+      left: round(content.minX),
+      bottom: round(content.minY),
+      right: round(Number(pageSize[0]) - content.maxX),
+      top: round(Number(pageSize[1]) - content.maxY),
+    }
+  }
+
+  return {
+    items: items.length,
+    groups: groups.length,
+    groupList: groups,
+    gaps: gapList,
+    pitches: { median: medianPitch, count: pitches.length },
+    ...(margins ? { margins } : {}),
+    issues,
+  }
+}
+
 export function compactInspect(raw, options = {}) {
   if (raw === null || typeof raw !== 'object') return raw
   const view = options.view ?? 'summary'
