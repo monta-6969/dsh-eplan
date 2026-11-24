@@ -1,0 +1,61 @@
+{
+  "name": "dsh-eplan",
+  "version": "0.13.0",
+  "private": true,
+  "description": "EPLAN Electric P8 drawing automation for DeepSeek Harness: an eplan preset whose only direct tool is run_code, 12 mcp__eplan__* tools that create pages, place symbols, draw and validate schematics, plus a video digest plugin that turns a screen recording into staged full-page frames.",
+  "type": "module",
+  "license": "MIT",
+  "author": "monta-6969",
+  "homepage": "https://github.com/monta-6969/dsh-eplan",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/monta-6969/dsh-eplan.git"
+  },
+  "bugs": {
+    "url": "https://github.com/monta-6969/dsh-eplan/issues"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "eplan",
+    "eplan-electric-p8",
+    "cad",
+    "schematic",
+    "mcp",
+    "electrical"
+  ],
+  "os": [
+    "win32"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "exports": {
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./mcp-link.js": "./mcp-link.js",
+    "./prompt-surface.js": "./prompt-surface.js",
+    "./restrict-tools.js": "./restrict-tools.js",
+    "./experience-nudge.js": "./experience-nudge.js",
+    "./image-budget.js": "./image-budget.js",
+    "./video-tool.js": "./video-tool.js",
+    "./video-digest.js": "./video-digest.js",
+    "./server/server.mjs": "./server/server.mjs",
+    "./server/video.mjs": "./server/video.mjs",
+    "./package.json": "./package.json"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-mcp-client": ">=0.2.0-rc.1 <0.3.0-0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.2.0",
+    "pdfjs-dist": "^4.10.38"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

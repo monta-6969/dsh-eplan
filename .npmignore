@@ -1,0 +1,37 @@
+# 编译产物不进包：setup.mjs 会在目标机重新编译。
+# 宿主的 DLL 引用的是本机 EPLAN 的程序集，跨机器拷贝必然崩。
+host/bin/
+bridge/bin/
+
+# 本机路径配置由 setup.mjs 在目标机重新生成
+server/eplan.config.json
+
+# 依赖装包时再装
+node_modules/
+
+# 打包目录、导出件
+dist/
+output/
+
+# 测试脚本只发自检那两个（INSTALL 让人跑它们）
+test/*
+!test/smoke-all.mjs
+!test/check-docs.mjs
+
+# 生成出来的引导脚本带时间戳，目标机自己生成
+script/EplanMcpBootstrap-*.cs
+
+# Python 字节码缓存（跑过 ipc_call.py 就会生成）
+__pycache__/
+*.pyc
+
+# 安装时生成的那份引导脚本；模板 script/EplanMcpBootstrap.cs 要留
+script/EplanMcpBootstrap.install.cs
+
+# 一次性的页面构造脚本，属于开发过程，不是产品的一部分。
+# tools/ 里只发四个调试工具：ipc_call.py、dismiss_dialog.ps1、screenshot.ps1、foreground.ps1
+# foreground.ps1 必须发：smoke-all.mjs 靠它验证「动作不抢焦点」，缺了这项检查会静默跳过。
+tools/build_*.py
+tools/draw_power_dist.py
+tools/onecall_check.py
+tools/uia_goto.py

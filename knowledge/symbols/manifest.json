@@ -1,0 +1,91 @@
+{
+  "generatedAt": "2026-11-23T03:21:57.434Z",
+  "page": "=JQR2623/900",
+  "paper": [
+    420,
+    297
+  ],
+  "pxPerMm": 10,
+  "symbols": [
+    {
+      "key": "BP",
+      "library": "SPECIAL",
+      "variant": 0,
+      "file": "BP.png",
+      "box": [
+        30,
+        24
+      ]
+    },
+    {
+      "key": "CO",
+      "library": "SPECIAL",
+      "variant": 0,
+      "file": "CO.png",
+      "box": [
+        24,
+        24
+      ]
+    },
+    {
+      "key": "TLRU",
+      "library": "SPECIAL",
+      "variant": 0,
+      "file": "TLRU.png",
+      "box": [
+        30,
+        24
+      ]
+    },
+    {
+      "key": "TOUR",
+      "library": "SPECIAL",
+      "variant": 0,
+      "file": "TOUR.png",
+      "box": [
+        30,
+        24
+      ]
+    },
+    {
+      "key": "TLRO",
+      "library": "SPECIAL",
+      "variant": 0,
+      "file": "TLRO.png",
+      "box": [
+        30,
+        24
+      ]
+    },
+    {
+      "key": "TOUL",
+      "library": "SPECIAL",
+      "variant": 0,
+      "file": "TOUL.png",
+      "box": [
+        30,
+        24
+      ]
+    },
+    {
+      "key": "CDPST",
+      "library": "SPECIAL",
+      "variant": 0,
+      "file": "CDPST.png",
+      "box": [
+        24,
+        28
+      ]
+    },
+    {
+      "key": "FA3",
+      "library": "GB_symbol",
+      "variant": 0,
+      "file": "FA3.png",
+      "box": [
+        30,
+        20
+      ]
+    }
+  ]
+}

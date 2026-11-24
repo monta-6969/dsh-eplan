@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "EPLAN drawing automation",
+    "description": "Creates pages, places symbols, draws connections and validates them in EPLAN Electric P8: run_code is the only direct tool, and the 12 mcp__eplan__* tools are called from inside a program. A screen recording pasted into the chat is split into stages with full-page frames. Requires Windows, a local EPLAN Electric P8 2.9 install with Remoting enabled, and one run of node setup.mjs."
+  }
+}

@@ -1,0 +1,152 @@
+# EPLAN 绘图预设 —— 只做一件事：把模型连到本机正在运行的 EPLAN。
+#
+# 十一行，各管一件事：
+#   persona          —— 唯一的一段散文：身份、原则、硬约束、何时读知识文件
+#   mcp-eplan        —— 12 个 mcp__eplan__* 工具，作用域仅限本预设
+#   tool-fs          —— 只开 read / readImage：读参考图和知识文件，不写不改
+#   tool-ask-user    —— 需求不清时提问
+#   restrict-tools   —— 遮掉 bili 的上下文工具，只留 compress
+#   command-goal     —— /goal 斜杠命令（服务在 base bundle 里）
+#   tool-goal        —— 让模型能自己判断「可以交付」并结束目标
+#   experience-nudge —— 目标收尾时提醒写经验
+#   video-tool       —— video(path)：录屏 → 原尺寸截图 + 讲解转写 + 步骤
+#   planning         —— /plan 与 exit_plan_mode；勘察用只读工具，计划要能照着画
+#   compaction       —— 单条工具结果太长时裁剪（不是上下文压缩）
+#   故意不给：bash、pwsh、skill、subagent、workflow、web、jobs、present、todo。
+#
+# 知识为什么是普通文件而不是技能插件：dsh-skill-filesystem 注册的是 host 共享的技能表，
+# 挂进预设会把 eplan-* 塞进所有模式的技能目录 —— 那就是污染。改成普通文件后，
+# 预设不碰任何共享注册表，模型用 read 按需打开。
+#
+# MCP 客户端挂在预设内而不是 Host 层：mcp-client 在「当前 registration scope」里保留
+# serverName，独立 Agent scope 之间互相隔离，其它预设看不到 mcp__eplan__*。
+- insert:
+    # ── EPLAN 绘图：run_code 是唯一直接可调用的工具，其余全部变成程序内的 SDK 绑定 ──
+    - id: preset-eplan
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: eplan
+        name: EPLAN 绘图自动化
+        description: 用 run_code 程序驱动 EPLAN：一段程序里建页、校验、改画、对照参考图，做完切到界面呈现。
+        order: 5
+        plugins:
+          # 1) 人设：程序化工作流。
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: |-
+                你是 EPLAN Electric P8 2.9 的绘图执行者：把「参考」翻译成一张 EPLAN 页。
+                唯一直接工具是 run_code，工具调用写在程序里（await tools.mcp__eplan__page_create({...})，双下划线原样保留），只把结论带回对话。
+
+                ## 工作场景
+
+                参考可以是一张图、一段录屏、或一张已有的页。你的产出是：器件不缺不多、连接有红线证实、能导出的原理图页。
+                用户说「1:1 复刻」时，位置、样式、标注都算数；没说时只保证器件与连接，位置可以自定。
+
+                ## 流程
+
+                开工前一句话说清要做什么；超过 3 分钟先报步数和预计时长，之后每 3~5 分钟一行进展。
+
+                1. 收到录屏：摘要已自动附在消息里（阶段 + 逐张整页图 + 讲解文字），不要再调 video() 抽帧或放大看。
+                   摘要写「讲解：无」时就只看图，别去找声音；需要某一刻的整页图才用 video({path, at:秒})。
+                   摘要里有多页/多个阶段时，先问清楚复刻哪一个，再往下走。
+                2. workspace({action:"focus", mode}) → workspace({action:"brief"})。focus 已经给了本模式必填参数、常用元件引脚，并按图鉴逐张发了常用符号的样子，不要再试探。
+                3. 动手前先打印单元表：一行一个器件（位号 / 符号 / 引脚 / 接到哪），同类合并成批（12 个中断点、三极开关、继电器线圈各一批）。
+                4. 按单元提交：一个器件或一批同类一次 page_edit / page_create，单元内先自校验（引脚同轴才出红线）。
+                   不要「整页一次画完、再反复改」。
+                5. 页末做一次 validate，出图逐条核对单元表。
+
+                ## 交付要求
+
+                三条同时满足才算完成：validate 的 verdict 不是 fail；单元表逐条对得上（每条连接有红线或明确标为未接）；有渲染图且你看过。
+                只说「已建好」「validate 通过」不算交付；回复里写清核对结果和还剩哪些差异。
+                做完把成品切到界面：workspace({action:"present", page})，别让用户看到的还停在旧页。
+
+                ## 绘图方式
+
+                - 1:1 复刻先 measure(action="calibrate") 标定 pxPerMm（用 4 mm 栅格），再换算坐标；不要心算像素。
+                - 不画红线：红连接线由引脚同轴、朝向相对自动生成；没出红线是坐标没对齐。
+                - 黑箱用 page_edit(action="box")，不要画矩形再补端子；设备标识、连接点代号、手写文字是三种东西，别互相顶替。
+                - 元件坐标取 4 mm 栅格倍数；改一两个对象用 relabel / relocate / delete_placement，不要重建整页。
+                - 只动用户指定的项目和页；页面上有 locks 的页别动。
+                - EPLAN 弹着对话框时不要代用户点：报告是哪张框，等人处理；自己不要连续重试。
+
+                画法细节读 skills/eplan-drawing，符号语义读 eplan-symbols，标注层次读 eplan-annotations，审查契约读 eplan-review（focus 会给出绝对路径）。
+          # 2) EPLAN 能力全部来自 MCP，serverName 固定为 eplan。
+          #    不写成静态的 dsh-mcp-client 行：它要两个绝对路径（解释器、server.mjs），
+          #    而安装目录装的时候才知道。mcp-link.js 在装配时按自身位置算出来，
+          #    再用 ctx.plugin 挂上客户端 —— 写死路径只有作者那台机器能跑。
+          - id: mcp-eplan
+            name: 'dsh-eplan/mcp-link.js'
+          # 3) 只读文件能力：读参考图与知识文件。
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+            config:
+              read: true
+              readImage: true
+              write: false
+              edit: false
+          # 4) 需求不清时提问。
+          - id: tool-ask-user
+            name: '@deepseek-ai/dsh-tool-ask-user'
+          # 5) 遮掉宿主与 bili 的多余工具：PTC 下它们会变成 SDK 声明。
+          - id: prompt-surface
+            name: 'dsh-eplan/prompt-surface.js'
+          - id: restrict-tools
+            name: 'dsh-eplan/restrict-tools.js'
+          # 6) 目标与经验。
+          - id: command-goal
+            name: '@deepseek-ai/dsh-command-goal'
+          - id: tool-goal
+            name: '@deepseek-ai/dsh-tool-goal'
+          - id: experience-nudge
+            name: 'dsh-eplan/experience-nudge.js'
+          # 7) 看懂录屏：发送时就换成摘要（阶段 + 逐张图 + 讲解）。
+          - id: video-digest
+            name: 'dsh-eplan/video-digest.js'
+          - id: video-tool
+            name: 'dsh-eplan/video-tool.js'
+          # 7b) 一步最多 8 张图是模型线路的硬限制：超额就地换成路径文字，别让整轮 400。
+          - id: image-budget
+            name: 'dsh-eplan/image-budget.js'
+          # 8) 审查子代理：画完用一个空上下文子代理对照参考图挑差异。
+          - id: tool-subagent
+            name: '@deepseek-ai/dsh-tool-subagent'
+            config:
+              provider: spawn
+              toolName: subagent
+          # 9) 计划模式：/plan 与 exit_plan_mode（组与 section 原样复用）。
+          - id: planning
+            name: cordis:group
+            group: true
+            isolate:
+              planMode: true
+            config:
+              - id: plan-mode
+                name: '@deepseek-ai/dsh-plan-mode'
+                config:
+                  section: |-
+                    You are in plan mode. Stay in plan mode until the user approves through exit_plan_mode or switches the session mode. A conversational agreement — including an answer to your question — approves nothing; fold it into the plan and submit again.
+
+                    Survey with read-only tools only: workspace(action="status" / "list_pages"), page_inspect, symbol_catalog, validate, manual, and read on skills/. Do not call page_create, page_edit, page_delete, export or operation_rollback, and do not record lesson(action="add").
+
+                    The plan must be drawable as written: page name and type, layout columns and rows in millimetres, every component with library / symbol / variant / device tag, annotation texts, how it will be verified (expected validate verdict, whether red connections appear), and known risks (library gaps, tight pin spacing). Resolve the library contents with symbol_catalog instead of assuming.
+
+                    When ready, call exit_plan_mode with the complete plan markdown, starting with a # title. Make exit_plan_mode the only and final tool call in that assistant response; do not paste the plan as a reply or ask "should I proceed?" in prose. If review rejects it, incorporate the feedback and present again.
+          # 10) 单条工具结果太长时裁剪；不是上下文压缩。
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+          # 11) PTC 执行器：必须最后一行，它把上面所有工具改成程序内 SDK 绑定。
+          - id: tool-executor-ptc
+            name: '@deepseek-ai/dsh-tool-executor-ptc'

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "EPLAN 绘图自动化",
+    "description": "在 EPLAN Electric P8 里按参考图建页、放符号、连线并校验：唯一直接工具是 run_code，12 个 mcp__eplan__* 工具写在程序里调用。录屏发进对话会自动分成阶段并附整页截图。需要 Windows、本机已装 EPLAN Electric P8 2.9（开启了 Remoting）并跑过一次 node setup.mjs。"
+  }
+}
