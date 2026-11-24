@@ -8,7 +8,7 @@
 
 另有第 13 个工具 `video`，**不在 MCP 里**：它注册在预设作用域，参数只有
 `path*` / `maxFrames` / `maxSteps` / `language`，内部走 `server/video.mjs`（ffmpeg）+ DSH 的
-`speechToText` 服务，返回 `{ steps[], frames[] }` 与若干图片 block。见 README「第 13 个工具」。
+`speechToText` 服务，返回 `{ steps[], frames[] }` 与若干图片 block。见 README「另外两个原生工具」。
 
 | 工具 | 参数 | 宿主 op |
 |---|---|---|
