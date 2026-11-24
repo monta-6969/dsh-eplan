@@ -15,12 +15,13 @@ import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import * as McpClient from '@deepseek-ai/dsh-mcp-client'
-
 export const name = 'eplan-mcp-link'
 
-// MCP 客户端要等它自己那几个服务就绪，跟着它一起等。
-export const inject = McpClient.inject
+// 不在这里静态 import @deepseek-ai/dsh-mcp-client：那样解析失败会让**整个模块**
+// 加载失败，预设里挂在这一行上的一切跟着消失，用户看到的是「这个模式不见了」。
+// 改成 apply 里动态 import 并且吞掉失败：最坏情况是 EPLAN 工具没挂上，
+// 预设本身照常出现，日志里有一行能看懂的原因。
+const MCP_CLIENT = '@deepseek-ai/dsh-mcp-client'
 
 const here = dirname(fileURLToPath(import.meta.url))
 
@@ -61,10 +62,23 @@ function resolveNode() {
   return { command: exe, env: { ELECTRON_RUN_AS_NODE: '1' } }
 }
 
-export function apply(ctx) {
+export async function apply(ctx) {
   const server = join(here, 'server', 'server.mjs')
   if (!existsSync(server)) {
-    throw new Error(`eplan: 缺少 MCP 服务端 ${server}（包装坏了？重装一次 dsh-eplan）`)
+    process.stderr.write(`[eplan] 缺少 MCP 服务端 ${server}（包装坏了？重装一次 dsh-eplan）\n`)
+    return
+  }
+
+  let McpClient
+  try {
+    McpClient = await import(MCP_CLIENT)
+  } catch (error) {
+    // 预设本身必须还能用：这里只少一组工具，不是少一个模式。
+    process.stderr.write(
+      `[eplan] 挂不上 MCP 客户端（${MCP_CLIENT}）: ${error instanceof Error ? error.message : String(error)}\n` +
+        `[eplan] EPLAN 工具这次不可用；预设其它部分照常。检查 DSH 版本是否与 peerDependencies 匹配。\n`,
+    )
+    return
   }
 
   const { command, env } = resolveNode()
