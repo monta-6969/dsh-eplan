@@ -1,5 +1,9 @@
 # EPLAN 绘图 MCP
 
+
+> **English** — A DeepSeek Harness bundle that draws in EPLAN Electric P8 2.9. It adds an agent preset in which `run_code` is the only directly callable tool: every EPLAN operation is a `tools.mcp__eplan__*` call inside one program, so a page is built, validated and finished without spilling intermediate JSON into the conversation. The 12 MCP tools are `workspace`, `symbol_catalog`, `page_create`, `page_edit`, `page_delete`, `page_inspect`, `validate`, `export`, `manual`, `operation_history`, `operation_rollback` and `lesson`; they speak a line protocol to `EplanBridge.exe`, which reaches the running EPLAN process over .NET Remoting. A pasted screen recording is digested into staged full-page frames before the model sees it.
+>
+> **Requirements:** Windows, EPLAN Electric P8 2.9 with Remoting enabled (port 49152), .NET Framework 4.x for `csc.exe` (no SDK), Node.js 20+. Install with `dsh plugin --profile <name> add github:monta-6969/dsh-eplan`, add `dsh-eplan` to that profile's `dsh.profile.bundles`, then **run the one-time setup before any tool works**: `node node_modules/dsh-eplan/setup.mjs` — it locates EPLAN, writes `%LOCALAPPDATA%\eplan-mcp\eplan.config.json`, compiles the host DLL and the bridge against your own EPLAN assemblies, registers the bootstrap script and prints `全部就绪`. Re-run it after upgrading the package, because the compiled binaries live inside the package directory.
 通过对话操作 EPLAN Electric P8 2.9 —— 建页、画线、插元件、读属性、导出预览图。
 
 ---
@@ -10,7 +14,7 @@
 对话（DSH 预设「EPLAN 绘图自动化」）
         │
         ▼
-server/server.mjs             ← MCP 服务，stdio，8 个工具
+server/server.mjs             ← MCP 服务，stdio，12 个工具
         │  行协议 JSON：{id, op, args} → {id, ok, result}
         ▼
 bridge/bin/EplanBridge.exe    ← .NET Remoting 客户端
