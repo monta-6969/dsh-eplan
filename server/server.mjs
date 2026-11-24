@@ -19,6 +19,7 @@ import z from 'zod'
 // 载荷收敛层：只改「回给模型的形状」，不碰任何 EPLAN 行为。
 import { compactInspect, geometryProblems, appearanceReport, digest, RepeatMemo } from './compact.mjs'
 import { closestSymbolNames } from './fuzzy.mjs'
+import { decideLaunch } from './launch-decision.mjs'
 import { normalizeEditArgs } from './edit-args.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -2147,6 +2148,28 @@ regTool(
             hint:
               'EPLAN 已经在跑而且 API 已经通了，不用 launch —— 直接干活就行（brief / open_page / page_create）。' +
               '确实要再起一个实例才传 force:true。',
+          })
+        }
+        // 探测不到 ≠ 没在跑。
+        //
+        // status 20 秒没回话，最可能是 EPLAN 正启动中或压着模态框，而不是没开。
+        // 如果这时候还去 launch，就会多起一个实例：两个 EPLAN 抢同一个项目/同一个数据目录，
+        // 表现是两边轮流弹「硬件错误:存储器访问受阻」，谁都干不了活。
+        // 2026-11-24 实测：一个会话把 status 超时当成「没开」，结果本机同时挂了两个 EPLAN。
+        const force = (openOpts.force ?? args.force) === true
+        const running = eplanProcessIds()
+        const decision = decideLaunch({ ready: current?.ready === true, answered: current !== null, processes: running, force })
+        if (decision === 'wait') {
+          return ok({
+            alreadyRunning: true,
+            starting: true,
+            ready: false,
+            processes: running,
+            hint:
+              `本机已经有 EPLAN 进程（pid ${running.join(', ')}），只是 status 没回话 —— 多半还在启动，` +
+              '或者被对话框压着。等 30~60 秒再 workspace{action:"status"} 一次，别开第二个实例：' +
+              '两个实例抢同一个项目和数据目录会互相弹「硬件错误:存储器访问受阻」。' +
+              '确实要再起一个才传 force:true。',
           })
         }
         const elk = args.project || args.name ? projectElkPath({ name: args.name ?? args.project, path: args.path, dir: args.dir }) : null

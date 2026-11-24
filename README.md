@@ -378,6 +378,7 @@ node test\raw-smoke.mjs
 | `test\video-offline.mjs` | 摘要正文结构 + 缓存命中时只回一张图 |
 | `test\appearance-offline.mjs` | 版面看相：分组、组间空隙、同列间距、四类问题 |
 | `test\fuzzy-offline.mjs` | 符号名写错时的候选（DCP → DCPL） |
+| `test\launch-offline.mjs` | `launch` 的决策：探测不到 ≠ 没在跑，不许起第二个实例 |
 | `test\page-edit-args.mjs` | `page_edit` 同一个 `to` 的两种含义（标识字符串 / 坐标） |
 | `test\compact-offline.mjs` | `page_inspect` 载荷三档体积与几何问题 |
 | `test\image-budget.mjs` | 一步最多 8 张图的配额 |

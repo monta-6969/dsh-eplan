@@ -521,16 +521,20 @@ export function appearanceReport(raw, { gapJoin = 24, pageSize = null } = {}) {
     }
   }
 
-  // 「挤」= 任意两个元件之间几乎没有余量。注意这里必须逐元件量：
-  // 分组本身是「间隔小于 24 就并成一组」，组与组之间永远 ≥ 24，拿组去量永远量不出挤。
+  // 「挤」= 两个元件之间还有一点缝、但不够放标签。
+  //
+  // 边界要写清楚：距离恰好 0（完全贴边或完全重合）不算「挤」——
+  // 重合是 duplicate_symbol 的地盘，贴边是同列行距太小（short_wires）的地盘。
+  // 2026-11-24 实测：一页 25 个元件的真实页面上，按 gap<4 报出来 4 条全是 gap=0，
+  // 和已有的 duplicate_symbol 重复，只会稀释注意力。
   for (let i = 0; i < items.length; i += 1) {
     for (let j = i + 1; j < items.length; j += 1) {
       const gap = gapBetween(items[i].box, items[j].box)
-      if (gap >= 4) continue
+      if (gap <= 0.5 || gap >= 4) continue
       issues.push({
         kind: 'group_crowded',
         where: `${items[i].name} ∩ ${items[j].name}`,
-        detail: `两个元件之间只剩 ${round(gap)} mm，设备标识和引脚代号会互相压字。`,
+        detail: `两个元件之间只有 ${round(gap)} mm，设备标识和引脚代号会互相压字。`,
         fix: '把其中一个按栅格挪开，至少留出标签宽度（一般 10 mm 以上）。',
       })
     }
