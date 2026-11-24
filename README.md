@@ -1,6 +1,6 @@
 # EPLAN 绘图 MCP
 
-在对话里直接画 EPLAN 图纸 —— 建页、摆元件、布线、标注、查错、出图。
+在对话里直接画 EPLAN2.9 图纸
 
 > **English** — A DeepSeek Harness bundle that draws in EPLAN Electric P8 2.9. In its preset `run_code` is the model's only directly callable tool: every EPLAN operation is a `tools.mcp__eplan__*` call inside one program, so a whole page is created, validated and rendered without spilling intermediate JSON into the conversation. Twelve MCP tools speak a line protocol to `EplanBridge.exe`, which reaches the running EPLAN over .NET Remoting. A pasted screen recording is digested into staged full-page frames plus its narration before the model sees it.
 
@@ -10,15 +10,11 @@
 
 ## 一、功能和实现目标
 
-**功能一句话**：把 EPLAN 的绘图能力接成工具，让模型写一段程序画完一页。
-
 **四个目标，按重要性排**
-
-1. **画得出来。** 建页、插符号、连导线、读写属性、挪动删除、导出 PNG/PDF/DXF —— 图纸上会发生的事都能用代码触发，不靠人点菜单。
-2. **一页一次调用。** 整页（行列布局 + 元件 + 标注）一次提交，中间 JSON 不进对话历史。实测整页 **557 ms**，而逐件调用要 15 次往返。贵的从来不是 EPLAN（一次操作 130 ms），是模型往返。
-3. **画完能自证。** `validate` 给「能不能交付」的结论，`page_inspect` 直接把渲染图返回，`appearance` 给版面数字（分组、组间空隙、同列间距、四边余量）。数据改对了但界面停在别处，对用户来说等于没做 —— 所以 `workspace(action="status")` 会告诉你用户屏幕上正显示哪一页。
-4. **经验跨会话留存。** 踩过的坑写进本机经验库，下一个会话第一步就能读到，不用重新踩一遍。
-
+1.画图。
+2.看视频、图片、pdf
+3.呈现结果（eplan对应标签置顶）
+4.保留你的绘图偏好
 **明确的边界**：不做 PLC 编程、不做 3D 布局、不改 EPLAN 自身配置、不做自动备份。EPLAN API 的改动**不进 GUI 撤销栈**，动手前要退路就用 EPLAN 自己的「项目 → 复制」做完整副本。
 
 ---
