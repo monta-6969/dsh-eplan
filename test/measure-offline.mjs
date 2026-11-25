@@ -7,7 +7,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { findBinary } from '../server/video.mjs'
-import * as mod from '../video-tool.js'
+import * as mod from '../preset/video-tool.js'
 
 const dir = mkdtempSync(join(tmpdir(), 'eplan-measure-'))
 const image = join(dir, 'grid.png')

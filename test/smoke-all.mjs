@@ -74,7 +74,7 @@ function foregroundPid() {
   try {
     const raw = execFileSync(
       'powershell',
-      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(bundleRoot, 'tools', 'foreground.ps1')],
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(bundleRoot, 'test', 'foreground.ps1')],
       { encoding: 'utf8', timeout: 20000 },
     )
     const parsed = JSON.parse(raw.trim())

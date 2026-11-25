@@ -32,7 +32,7 @@ npm install --omit=dev
 node setup.mjs
 ```
 
-`setup.mjs` 做五件事：找 EPLAN → 查 csc/node → 写 `server/eplan.config.json`
+`setup.mjs` 做四件事：找 EPLAN → 查 csc/node 并写 `%LOCALAPPDATA%\eplan-mcp\eplan.config.json`
 → **在本机编译**宿主和桥接器 → 注册引导脚本并自检。
 
 **必须在目标机编译**：宿主 DLL 引用本机 EPLAN 的程序集，2.9 和 2.10 API 不同，
@@ -40,12 +40,10 @@ node setup.mjs
 
 ## 手动排障：绕开 MCP 直连桥接器
 
-怀疑是 MCP 层的问题时，直接用文件 IPC 调宿主（几百毫秒一轮，比走 MCP 快得多）：
+怀疑是 MCP 层的问题时，直接喂桥接器一行 JSON（几百毫秒一轮，比走 MCP 快得多）：
 
-```python
-import sys; sys.path.insert(0, r'<安装目录>\tools')
-from ipc_call import call
-print(call('status', {}, timeout=60))
+```powershell
+'{"id":1,"op":"status","args":{}}' | native\bridge\bin\EplanBridge.exe
 ```
 
 这一步通了，说明「桥接器 → 宿主 → EPLAN」都是好的，问题在 MCP/预设层。
@@ -53,13 +51,13 @@ print(call('status', {}, timeout=60))
 ## 改完宿主要重新编译
 
 ```powershell
-powershell -File host\build.ps1      # 生成 EplanMcpHost-<ticks>.dll
-powershell -File script\prepare-install.ps1   # 生成 EplanMcpBootstrap-<ticks>.cs
+powershell -File native\host\build.ps1          # 生成 EplanMcpHost-<ticks>.dll
+powershell -File native\script\prepare-install.ps1   # 生成 EplanMcpBootstrap-<ticks>.cs
 ```
 
 宿主是**热重载**的：引导脚本每次调用都扫目录取最新的 DLL，不用重启 EPLAN。
 但引导脚本本身改了，就要重新 `prepare-install` + `RegisterScript`（换文件名才强制重编译，
 同路径会复用旧结果）。
 
-`script/verify-bootstrap.ps1` 会用与 EPLAN 完全相同的引用集预编译一遍引导脚本，
+`native/script/verify-bootstrap.ps1` 会用与 EPLAN 完全相同的引用集预编译一遍引导脚本，
 在塞进 EPLAN 之前就把编译错误抓出来。改脚本后**一定要跑**。

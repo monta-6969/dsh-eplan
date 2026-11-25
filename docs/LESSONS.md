@@ -8,7 +8,7 @@
 ## 一、最终形态
 
 ```
-对话（DSH 预设「EPLAN 绘图」）
+对话（DSH 预设「eplan绘图自动化」）
    ├─ 12 个 MCP 工具  → Node MCP 服务 → EplanBridge.exe → EPLAN 进程内宿主 DLL
    └─ 1 个原生工具  video（录屏 → 原尺寸截图 + 讲解转写 + 步骤）
 ```

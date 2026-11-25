@@ -6,7 +6,7 @@
 // 做法：建一张临时页 → 按网格插常用符号 → 渲染整页 → 按毫米坐标裁成单张 → 存进
 // knowledge/symbols/。之后 focus / symbol_catalog(pins) 直接发这些图，不再麻烦 EPLAN。
 //
-//   node script/build-symbol-gallery.mjs [--keep-page]
+//   node native/script/build-symbol-gallery.mjs [--keep-page]
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { join, dirname } from 'node:path'
@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const root = join(here, '..')
+const root = join(here, '..', '..')
 const OUT_DIR = join(root, 'knowledge', 'symbols')
 const PAGE = '=JQR2623/900'
 const keepPage = process.argv.includes('--keep-page')

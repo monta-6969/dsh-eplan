@@ -1,19 +1,22 @@
-# EPLAN 绘图预设 —— 只做一件事：把模型连到本机正在运行的 EPLAN。
+# eplan 绘图自动化 —— 只做一件事：把模型连到本机正在运行的 EPLAN。
 #
-# 十一行，各管一件事：
-#   persona          —— 唯一的一段散文：身份、原则、硬约束、何时读知识文件
+# 预设由这些部分组成，各管一件事：
+#   persona          —— 唯一的一段散文：身份、工作循环、交付要求、绘图硬约束
 #   mcp-eplan        —— 12 个 mcp__eplan__* 工具，作用域仅限本预设
 #   tool-fs          —— 只开 read / readImage：读参考图和知识文件，不写不改
 #   tool-ask-user    —— 需求不清时提问
-#   restrict-tools   —— 遮掉 bili 的上下文工具，只留 compress
-#   command-goal     —— /goal 斜杠命令（服务在 base bundle 里）
-#   tool-goal        —— 让模型能自己判断「可以交付」并结束目标
+#   prompt-surface   —— 遮掉宿主自带的同名工具说明，工具面保持一份
+#   restrict-tools   —— 遮掉宿主与上下文插件多余的工具，只留 compress
+#   command-goal / tool-goal —— /goal，以及模型自己判断「可以交付」并收尾
 #   experience-nudge —— 目标收尾时提醒写经验
-#   video-tool       —— video(path)：录屏 → 原尺寸截图 + 讲解转写 + 步骤
+#   video-digest / video-tool —— 录屏发送时就换成摘要；video(path) 手动补看
+#   image-budget     —— 一步最多 8 张图，超额就地换成路径文字
+#   tool-subagent    —— 交付前起空上下文子代理对照参考图挑差异
 #   planning         —— /plan 与 exit_plan_mode；勘察用只读工具，计划要能照着画
 #   compaction       —— 单条工具结果太长时裁剪（不是上下文压缩）
-#   故意不给：bash、pwsh、skill、subagent、workflow、web、jobs、present、todo。
+#   tool-executor-ptc —— 必须最后一行：它把上面所有工具改成程序内 SDK 绑定
 #
+# 故意不给：bash、pwsh、skill、workflow、web、jobs、present、todo。
 # 知识为什么是普通文件而不是技能插件：dsh-skill-filesystem 注册的是 host 共享的技能表，
 # 挂进预设会把 eplan-* 塞进所有模式的技能目录 —— 那就是污染。改成普通文件后，
 # 预设不碰任何共享注册表，模型用 read 按需打开。
@@ -21,12 +24,12 @@
 # MCP 客户端挂在预设内而不是 Host 层：mcp-client 在「当前 registration scope」里保留
 # serverName，独立 Agent scope 之间互相隔离，其它预设看不到 mcp__eplan__*。
 - insert:
-    # ── EPLAN 绘图：run_code 是唯一直接可调用的工具，其余全部变成程序内的 SDK 绑定 ──
+    # ── eplan 绘图：run_code 是唯一直接可调用的工具，其余全部变成程序内的 SDK 绑定 ──
     - id: preset-eplan
       name: '@deepseek-ai/dsh-agent-preset'
       config:
         id: eplan
-        name: EPLAN 绘图自动化
+        name: eplan绘图自动化
         description: 用 run_code 程序驱动 EPLAN：一段程序里建页、校验、改画、对照参考图，做完切到界面呈现。
         order: 5
         plugins:
@@ -77,7 +80,7 @@
           #    而安装目录装的时候才知道。mcp-link.js 在装配时按自身位置算出来，
           #    再用 ctx.plugin 挂上客户端 —— 写死路径只有作者那台机器能跑。
           - id: mcp-eplan
-            name: 'dsh-eplan/mcp-link.js'
+            name: 'dsh-eplan/preset/mcp-link.js'
           # 3) 只读文件能力：读参考图与知识文件。
           - id: tool-fs
             name: '@deepseek-ai/dsh-tool-fs'
@@ -91,24 +94,24 @@
             name: '@deepseek-ai/dsh-tool-ask-user'
           # 5) 遮掉宿主与 bili 的多余工具：PTC 下它们会变成 SDK 声明。
           - id: prompt-surface
-            name: 'dsh-eplan/prompt-surface.js'
+            name: 'dsh-eplan/preset/prompt-surface.js'
           - id: restrict-tools
-            name: 'dsh-eplan/restrict-tools.js'
+            name: 'dsh-eplan/preset/restrict-tools.js'
           # 6) 目标与经验。
           - id: command-goal
             name: '@deepseek-ai/dsh-command-goal'
           - id: tool-goal
             name: '@deepseek-ai/dsh-tool-goal'
           - id: experience-nudge
-            name: 'dsh-eplan/experience-nudge.js'
+            name: 'dsh-eplan/preset/experience-nudge.js'
           # 7) 看懂录屏：发送时就换成摘要（阶段 + 逐张图 + 讲解）。
           - id: video-digest
-            name: 'dsh-eplan/video-digest.js'
+            name: 'dsh-eplan/preset/video-digest.js'
           - id: video-tool
-            name: 'dsh-eplan/video-tool.js'
+            name: 'dsh-eplan/preset/video-tool.js'
           # 7b) 一步最多 8 张图是模型线路的硬限制：超额就地换成路径文字，别让整轮 400。
           - id: image-budget
-            name: 'dsh-eplan/image-budget.js'
+            name: 'dsh-eplan/preset/image-budget.js'
           # 8) 审查子代理：画完用一个空上下文子代理对照参考图挑差异。
           - id: tool-subagent
             name: '@deepseek-ai/dsh-tool-subagent'

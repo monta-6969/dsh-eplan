@@ -1,4 +1,4 @@
-# 0.5.0 接口契约（M0 冻结）
+# 接口契约（M0 冻结）
 
 改这个文件等于改契约。四个执行块都按这里写，不许各自发明名字。
 
@@ -53,7 +53,7 @@ pdf                       → manual{action:"outline|search|render"}
 **为什么只合并表面**：宿主 21 个 op 已真机验证，改名即风险。合并层在 `server/server.mjs`，一个 action 翻译成一个既有 op。
 
 `relocate` / `relabel` / `delete_placement` 走 0.6.0 新增的 `placement_move` / `placement_relabel` / `placement_delete`。
-引导脚本每次连接都会挑 `host\bin` 里最新的宿主 DLL（`EplanMcpBootstrap.cs` 的热重载逻辑），
+引导脚本每次连接都会挑 `native\host\bin` 里最新的宿主 DLL（`EplanMcpBootstrap.cs` 的热重载逻辑），
 所以**build.ps1 跑完即可用，不用重启 EPLAN**；只有 EPLAN 里还没加载过任何宿主时才会退回 `HOST_OUTDATED`。
 `present` 的 job 化（`wait:false` → `wait`）完全在 server 进程内。
 

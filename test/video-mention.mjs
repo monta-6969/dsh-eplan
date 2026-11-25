@@ -11,7 +11,7 @@ import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { findBinary } from '../server/video.mjs'
-import * as plugin from '../video-digest.js'
+import * as plugin from '../preset/video-digest.js'
 
 let pass = 0
 let fail = 0

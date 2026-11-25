@@ -63,7 +63,7 @@ function resolveNode() {
 }
 
 export async function apply(ctx) {
-  const server = join(here, 'server', 'server.mjs')
+  const server = join(here, '..', 'server', 'server.mjs')
   if (!existsSync(server)) {
     process.stderr.write(`[eplan] 缺少 MCP 服务端 ${server}（包装坏了？重装一次 dsh-eplan）\n`)
     return

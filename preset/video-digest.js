@@ -12,7 +12,7 @@
 //   本文件             —— 接 DSH 服务：转写（speechToText）、存图（attachments）、改消息
 import { existsSync, readFileSync } from 'node:fs'
 import { basename, extname, isAbsolute, resolve } from 'node:path'
-import { digest as analyzeDigest, decodeWav, encodeWav } from './server/video.mjs'
+import { digest as analyzeDigest, decodeWav, encodeWav } from '../server/video.mjs'
 
 export const name = 'video-digest'
 

@@ -5,7 +5,7 @@
 // 5 个断言一直红着没人发现（2026-11-16 修）。
 //
 //   node test/restrict-tools.test.mjs
-import { DENY_LISTS, apply } from '../restrict-tools.js'
+import { DENY_LISTS, apply } from '../preset/restrict-tools.js'
 
 let failed = 0
 const ok = (condition, label) => {

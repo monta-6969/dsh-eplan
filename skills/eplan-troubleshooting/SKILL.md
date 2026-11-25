@@ -74,8 +74,9 @@ MCP 层的参数校验是 **zod 严格模式**：schema 里没声明的字段会
 - `project` 一度没在 schema 里 → 传了 `project:"test"` 仍然操作当前项目
 - `grid` 一度没在 schema 里 → 传了吸附不生效
 
-判断方法：同样的参数用 `tools/ipc_call.py` 直连宿主试一次。直连生效、走 MCP 不生效，
-就是 schema 漏字段，去 `server/server.mjs` 补。
+判断方法：同样的参数直接用桥接器喂一行 JSON 给宿主试一次
+（`'{"id":1,"op":"status","args":{}}' | native\bridge\bin\EplanBridge.exe`）。
+直连生效、走 MCP 不生效，就是 schema 漏字段，去 `server/server.mjs` 补。
 
 ## `BAD_LAYOUT`：布局引用写错了
 

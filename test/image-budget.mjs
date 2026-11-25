@@ -2,7 +2,7 @@
 // 造一个假 ctx，模拟「同一步里两次 video 返回 8 + 12 张图」，检查超额的图被换成路径文字。
 //
 //   node test/image-budget.mjs
-import * as mod from '../image-budget.js'
+import * as mod from '../preset/image-budget.js'
 
 const checks = []
 function check(name, ok, detail) {

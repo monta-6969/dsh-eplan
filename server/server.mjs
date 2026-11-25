@@ -2,7 +2,7 @@
 //
 // 这个进程本身不懂 EPLAN：它只把工具调用翻译成桥接器（EplanBridge.exe）能读的
 // 行协议，桥接器再用 .NET Remoting 把请求送进运行中的 EPLAN 进程。
-// 真正的绘图逻辑在 script/EplanMcpBridge.cs 里，跑在 EPLAN 内部。
+// 真正的绘图逻辑在 native/host/src/ 下，跑在 EPLAN 内部。
 //
 //   MCP (stdio)  ◀──▶  server.mjs  ◀──▶  EplanBridge.exe  ◀──▶  EPLAN.exe
 //
@@ -28,7 +28,7 @@ const root = resolve(here, '..')
 // 桥接器每次都编译成带时间戳的新文件（跑起来会被占用，同名覆盖必然失败），
 // 所以启动时扫一遍目录取最新的那个。
 function newestBridge() {
-  const dir = join(root, 'bridge', 'bin')
+  const dir = join(root, 'native', 'bridge', 'bin')
   try {
     const candidates = readdirSync(dir)
       .filter((name) => /^EplanBridge.*\.exe$/i.test(name))
@@ -111,7 +111,7 @@ function configDir() {
 // 「多用户冲突 / 数据库被另一用户单独锁定」的**模态框**。模态框会挡住 EPLAN 的
 // 消息循环，MCP 调用只能干等到 290 秒超时，用户看到的现象是「卡死」。
 //
-// 桥接器（bridge\src\Program.cs:342-361）拿到多台 server 时只按 "P8" 挑第一个，
+// 桥接器（native\bridge\src\Program.cs:342-361）拿到多台 server 时只按 "P8" 挑第一个，
 // 挑中哪个实例不确定，所以这种冲突会随机复发。这里在 open_project 之前先做两件
 // 能确定的事：
 //   1) 问当前连着的这个实例：项目是不是已经开着（开着就直接复用，不再开）；
@@ -673,7 +673,7 @@ function startBridge() {
   if (!existsSync(config.bridgeExe)) {
     throw fail(
       'BRIDGE_MISSING',
-      `找不到桥接器：${config.bridgeExe}。请先运行 bridge\\build.ps1 编译。`,
+      `找不到桥接器：${config.bridgeExe}。请先运行 native\\bridge\\build.ps1 编译。`,
     )
   }
 

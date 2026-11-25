@@ -5,7 +5,7 @@
 //
 // 它做四件事：
 //   1. 发现环境（EPLAN 装在哪、版本多少、node/csc 有没有、数据目录在哪）
-//   2. 生成 server/eplan.config.json —— 所有写死的路径都收进这个文件
+//   2. 写 %LOCALAPPDATA%\eplan-mcp\eplan.config.json —— 所有写死的路径都收进这个文件
 //   3. 编译宿主 DLL 和桥接器 EXE（必须在本机编译：引用的是本机 EPLAN 的程序集）
 //   4. 把引导脚本注册进 EPLAN，然后跑一次 status 自检
 //
@@ -135,7 +135,7 @@ log(`    已写: ${configPath}`)
 
 step(4, '编译宿主和桥接器')
 // 这两步必须在目标机做：DLL 引用的是本机 EPLAN 的程序集。
-for (const build of ['host\\build.ps1', 'bridge\\build.ps1']) {
+for (const build of ['native\\host\\build.ps1', 'native\\bridge\\build.ps1']) {
   const full = join(root, build)
   if (!existsSync(full)) {
     console.error(`   缺少构建脚本: ${full}`)
@@ -157,7 +157,7 @@ for (const build of ['host\\build.ps1', 'bridge\\build.ps1']) {
 step(5, '注册引导脚本并自检')
 log('    注意：这一步需要 EPLAN 正在运行。')
 
-const bridge = newestFile(join(root, 'bridge', 'bin'), /^EplanBridge.*\.exe$/i)
+const bridge = newestFile(join(root, 'native', 'bridge', 'bin'), /^EplanBridge.*\.exe$/i)
 if (!bridge) {
   console.error('   没找到编译出来的桥接器。')
   process.exit(5)
@@ -171,9 +171,9 @@ function callBridge(op, args = {}, timeout = 300000) {
 }
 
 // install 要拿到引导脚本的路径（注册的是脚本文件，不是宿主的 DLL）。
-const bootstrap = newestFile(join(root, 'script'), /^EplanMcpBootstrap.*\.cs$/i)
+const bootstrap = newestFile(join(root, 'native', 'script'), /^EplanMcpBootstrap.*\.cs$/i)
 if (!bootstrap) {
-  console.error('   没找到引导脚本（script/EplanMcpBootstrap-*.cs）。先跑 script/prepare-install.ps1。')
+  console.error('   没找到引导脚本（native/script/EplanMcpBootstrap-*.cs）。先跑 native/script/prepare-install.ps1。')
   process.exit(5)
 }
 log('    引导脚本: ' + bootstrap)
@@ -199,7 +199,7 @@ EPLAN 没在运行。装好后打开 EPLAN（双击桌面快捷方式即可）�
   node setup.mjs
 `)
 } else if (statusText.indexOf('"ready":true') >= 0) {
-  log('\n全部就绪。在 DSH 里选「EPLAN 绘图」模式即可开始。\n想逐项确认每个工具都能用，再跑一次：node test/smoke-all.mjs')
+  log('\n全部就绪。在 DSH 里选「eplan绘图自动化」模式即可开始。\n想逐项确认每个工具都能用，再跑一次：node test/smoke-all.mjs')
 } else {
   log('\n装好了，但 EPLAN 还没打开项目。在 EPLAN 里打开一个项目后重试 status。')
 }
@@ -207,7 +207,7 @@ EPLAN 没在运行。装好后打开 EPLAN（双击桌面快捷方式即可）�
 // 最后顺手清一下临时目录：渲染图和手册截图会一直攒着，没人清就是几个 MB 起步。
 // 失败不影响安装结果，所以只打印、不改变退出码。
 try {
-  const pruned = execFileSync(process.execPath, [join(root, 'tools', 'prune.mjs')], {
+  const pruned = execFileSync(process.execPath, [join(root, 'native', 'script', 'prune.mjs')], {
     encoding: 'utf8',
     timeout: 60000,
   })

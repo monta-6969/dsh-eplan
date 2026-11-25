@@ -45,7 +45,7 @@ if (existsSync(skillsDir)) {
 }
 files.push(path.join(root, 'cordis.patch.yml'))
 files.push(path.join(root, 'README.md'))
-files.push(path.join(root, 'INSTALL.md'))
+files.push(path.join(root, 'docs', 'INSTALL.md'))
 
 const problems = []
 

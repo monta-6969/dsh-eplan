@@ -9,7 +9,7 @@
 import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
-import * as mod from '../video-tool.js'
+import * as mod from '../preset/video-tool.js'
 import { clock, planStages, renderDigest, stableTime } from '../server/video.mjs'
 const { apply } = mod
 

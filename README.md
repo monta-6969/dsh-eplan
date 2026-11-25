@@ -1,6 +1,6 @@
 # EPLAN 绘图 MCP
 
-在对话里直接画 EPLAN2.9 图纸
+在对话里直接画 EPLAN 2.9 图纸。
 
 > **English** — A DeepSeek Harness bundle that draws in EPLAN Electric P8 2.9. In its preset `run_code` is the model's only directly callable tool: every EPLAN operation is a `tools.mcp__eplan__*` call inside one program, so a whole page is created, validated and rendered without spilling intermediate JSON into the conversation. Twelve MCP tools speak a line protocol to `EplanBridge.exe`, which reaches the running EPLAN over .NET Remoting. A pasted screen recording is digested into staged full-page frames plus its narration before the model sees it.
 
@@ -11,10 +11,12 @@
 ## 一、功能和实现目标
 
 **四个目标，按重要性排**
-1.画图。
-2.看视频、图片、pdf
-3.呈现结果（eplan对应标签置顶）
-4.保留你的绘图偏好
+
+1. **画图。** 建页、摆元件、布线、标注、改属性、查错、导出 PNG/PDF/DXF —— 图纸上会发生的事都能用一段程序触发。
+2. **看视频、图片、PDF。** 录屏自动切成阶段，每段给一张整页图加讲解；截图能标定像素换算毫米；电气手册的页面直接渲染成图。
+3. **呈现结果（EPLAN 对应标签置顶）。** 画完把那一页切到前台，用户屏幕上看到的就是成品，而不是「数据改对了但界面停在旧页」。平时不抢焦点，只在交付时切。
+4. **保留你的绘图偏好。** 你说过的做法（「做完一定要切到界面给我看」）记进本机偏好表，每个新会话第一步就能读到，不用重复交代。
+
 **明确的边界**：不做 PLC 编程、不做 3D 布局、不改 EPLAN 自身配置、不做自动备份。EPLAN API 的改动**不进 GUI 撤销栈**，动手前要退路就用 EPLAN 自己的「项目 → 复制」做完整副本。
 
 ---
@@ -38,9 +40,9 @@
 | `manual` | 把 PDF 手册页面渲染成图给你看（`outline` / `search` / `render`） | 否 |
 | `operation_history` | 查真实发生过的写操作，含前后状态与能否回退 | 否 |
 | `operation_rollback` | 按 `operation_id` 撤回一次写操作 | **是** |
-| `lesson` | `add` 记一条经验 / `list` 读回来 | 否 |
+| `lesson` | `add` 记一条经验 / `prefer` 记一条用户偏好 / `list` 读回来 | 否 |
 
-坐标统一 **mm**，原点在页面**左下角**，**X 向右、Y 向上**，一律 `[x, y]` 数组。`reveal=true` 只把图返回给模型，**不会**切换用户屏幕上的页；要真的翻页得显式调 `open_page(focus=true)`，默认不抢前台。
+坐标统一 **mm**，原点在页面**左下角**，**X 向右、Y 向上**，一律 `[x, y]` 数组。`reveal=true` 只把图返回给模型，**不会**切换用户屏幕上的页；要真的翻页得显式调 `open_page(focus=true)` 或 `present`。
 
 ### 另外两个原生工具（不进 MCP）
 
@@ -49,9 +51,9 @@
 | `video` | 录屏 → 阶段化整页截图 + 讲解转写 + 步骤 | 转写要用 DSH 的 `speechToText`（本机 SenseVoice），MCP 是独立进程够不到 |
 | `measure` | 截图/视频帧里的像素换算成毫米，找线、推栅格 | 纯本地图像计算，不碰 EPLAN |
 
-录屏**不需要模型主动调用**：`video-digest.js` 在 `agent/pre-step` 就把上传的附件或输入框里 `@C:\…\xxx.mp4` 换成摘要，图和讲解一起进上下文。
+录屏**不需要模型主动调用**：`preset/video-digest.js` 在 `agent/pre-step` 就把上传的附件或输入框里 `@C:\…\xxx.mp4` 换成摘要，图和讲解一起进上下文。
 
-### 6 份技能 + 1 个预设
+### 7 份技能 + 1 个预设
 
 知识不塞进提示词，只在模型判断需要时进上下文：
 
@@ -62,13 +64,19 @@
 | `eplan-annotations` | 标注图鉴：谁渲染、在哪、什么颜色、怎么改 |
 | `eplan-review` | 交付前起审查子代理对照参考图挑差异 |
 | `eplan-project` | 新建大项目：页清单、认领页、逐页闭环 |
+| `eplan-setup` | 装机器、改宿主后重新编译、绕开 MCP 直连排障 |
 | `eplan-troubleshooting` | 报错码、调用卡住、红线没生成、字没显示 |
 
-预设「EPLAN 绘图自动化」只保留一种模式：模型唯一的直接工具是 `run_code`，EPLAN 工具写成程序里的 `await tools.mcp__eplan__*`，一整页的建、校、改在一段程序里跑完。`/plan` 先出方案、批准了再动手；交付前可起一个空上下文子代理专门挑差异。
+预设「eplan绘图自动化」只保留一种模式：模型唯一的直接工具是 `run_code`，EPLAN 工具写成程序里的 `await tools.mcp__eplan__*`，一整页的建、校、改在一段程序里跑完。`/plan` 先出方案、批准了再动手；交付前可起一个空上下文子代理专门挑差异。
 
-### 经验库
+### 经验与偏好
 
-`%LOCALAPPDATA%\eplan-mcp\knowledge\notes.jsonl`，一行一条、只追加不覆盖。**它不经过 EPLAN**：EPLAN 没开、崩了、被模态框卡住时，经验和环境总览照样能读能写 —— 那恰恰是最该把教训记下来的时刻。
+两份都放在本机、都不经过 EPLAN：
+
+- **经验**：`%LOCALAPPDATA%\eplan-mcp\knowledge\notes.jsonl`，一行一条、只追加不覆盖。
+- **偏好**：同目录 `preferences.json`，最多 40 条，`workspace(action="status")` 每次都会带上。
+
+EPLAN 没开、崩了、被模态框卡住时，经验和环境总览照样能读能写 —— 那恰恰是最该把教训记下来的时刻。
 
 ---
 
@@ -77,18 +85,18 @@
 ### 三层结构
 
 ```
-对话（DSH 预设「EPLAN 绘图自动化」）
+对话（DSH 预设「eplan绘图自动化」）
       │  run_code 里 await tools.mcp__eplan__*
       ▼
 server/server.mjs             MCP 服务，stdio，12 个工具
       │  行协议 JSON：{id, op, args} → {id, ok, result}
       ▼
-bridge/bin/EplanBridge.exe    .NET Remoting 客户端
+native/bridge/bin/EplanBridge.exe    .NET Remoting 客户端
       │  ExecuteAction("EplanMcpRun", payload)
       ▼
 【 EPLAN 进程 】
-      ├─ script/EplanMcpBootstrap.install.cs   装一次，极薄，只做反射转发
-      └─ host/bin/EplanMcpHost.dll             真正干活：DataModel + HEServices
+      ├─ native/script/EplanMcpBootstrap.install.cs   装一次，极薄，只做反射转发
+      └─ native/host/bin/EplanMcpHost.dll             真正干活：DataModel + HEServices
 ```
 
 **为什么必须双层。** EPLAN 的脚本编译器把引用集写死在 `EplanEplApiScriptLogu.erx` 里，只有 `Base`/`AF`/`Gui`/`RecorderTools`/`EServices` 这几支，**没有 `DataModel`，也没有 `HEServices`** —— 而建页、布线、导出全在这两个程序集里。直接写 `.cs` 脚本会在编译期就死（`CS0234: 命名空间"Eplan.EplApi"中不存在"DataModel"`）。唯一的绕法是：自己用 `csc.exe` 编译 DLL（不受那个引用集约束），脚本里只出现 `System.Reflection`，运行时把 DLL 反射加载进 EPLAN 的 AppDomain —— 那时 EPLAN 早就加载过 `DataModelu`，类型自然对得上。
@@ -98,9 +106,9 @@ bridge/bin/EplanBridge.exe    .NET Remoting 客户端
 ### 九个创新点
 
 1. **红线不画，只摆符号。** EPLAN 的红色连接线不是图元，是软件根据「引脚是否共点、是否朝向相对」自动补的，分支点还会自动长接头。所以正确画法是**一个线条图元都不画**：自己画的线是青绿色 `Graphics.Line`，和真图纸不是一回事。成品页实测 0 条手绘线。
-2. **一页一次调用。** `page_create` 收 `layout`（行列毫米）+ `nodes` + `texts`，557 ms 出整页并返回图 + 结构化数据，对照逐件调用 15 次往返。
-3. **版面看相。** `validate` 的 `appearance` 把「摆得好不好看」变成数字：分组数、组间空隙、同列间距、四边余量。`=JQR2623/7` 实测组间中位空隙 84 mm，工具独立得出了用户原话「一些组可以聚拢一点」的同一结论 —— 这种话以后不用用户说。
-4. **深色渲染。** EPLAN 导出只有打印配色（白底蓝符号），没有参数可选。宿主在渲染后按像素重新上色成用户屏幕上的深色方案（黑底、黄符号、红导线、白图框），要白底交付图时传 `theme:"light"`。颜色在原理图里有含义，不能糊弄。
+2. **一页一次调用。** `page_create` 收 `layout`（行列毫米）+ `nodes` + `texts`，557 ms 出整页并返回图 + 结构化数据，对照逐件调用 15 次往返。贵的从来不是 EPLAN（一次操作 130 ms），是模型往返。
+3. **版面看相。** `validate` 的 `appearance` 把「摆得好不好看」变成数字：分组数、组间空隙、同列间距、四边余量。`=JQR2623/7` 实测组间中位空隙 84 mm，工具独立得出了用户原话「一些组可以聚拢一点」的同一结论。
+4. **深色渲染。** EPLAN 导出只有打印配色（白底蓝符号），没有参数可选。宿主在渲染后按像素重新上色成用户屏幕上的深色方案（黑底、黄符号、红导线、白图框），要白底交付图时传 `theme:"light"`。
 5. **录屏真能看懂。** 一次 ffmpeg 出每秒整屏序列 + 顶部标题条，按「刷新重画」切阶段（最小 15 秒），每段取最稳的一帧，语音按响度切段逐段转写（服务只回整段文字、不带时间戳，不自己切就永远对不上画面）。图是 JPEG q3、长边 1600、**逐张发、绝不拼图** —— 同一帧 PNG 要 700 KB。
 6. **缓存与显卡解码。** 摘要按 `sha1(路径:字节:时间戳)` 落盘，第二次调用不解码；要某一秒的整页图只回那一张，几分之一秒。采样解码默认走显卡，关键在**哪些帧被拷回内存**：解码和 `fps` 都留在显存里，只把每秒那一帧 `hwdownload` 回来 —— 带 `-hwaccel_output_format` 逐帧隐式下载反而比纯 CPU 慢 2 倍。解不了会自动降级回软件解码。
 7. **失败就说事实，不让模型猜。** 超时不再是一个笼统的 `EPLAN_TIMEOUT`：桥接器枚举 EPLAN 的 `#32770` 窗口，报 `EPLAN_BLOCKED_BY_DIALOG` 并写出对话框标题；探测 2 秒无响应就标记不健康；**同一错误同一参数再来一次直接劝停**并给替代动作；符号名写错（`DCP`）直接给候选（`RCP`）和下一步。
@@ -132,18 +140,18 @@ dsh plugin --profile <name> add github:monta-6969/dsh-eplan
 node node_modules/dsh-eplan/setup.mjs        # 打印「全部就绪」即成功
 ```
 
-**必须在本机编译**：宿主 DLL 引用的是本机 EPLAN 的程序集，2.9 与 2.10 的 API 不同，拷别人编好的 DLL 会 `MissingMethodException`。换机器、升级包之后都要重跑 `setup.mjs`。手动编译、单独注册脚本、卸载的细节见 [INSTALL.md](INSTALL.md)。
+**必须在本机编译**：宿主 DLL 引用的是本机 EPLAN 的程序集，2.9 与 2.10 的 API 不同，拷别人编好的 DLL 会 `MissingMethodException`。换机器、升级包之后都要重跑 `setup.mjs`。手动编译、单独注册脚本、卸载的细节见 [docs/INSTALL.md](docs/INSTALL.md)。
 
 ### 自检
 
 不碰 EPLAN 就能跑，改完任意一侧都该全绿（22 个用例）：
 
 ```powershell
-node test\check-docs.mjs        # 文档与工具面一致
-node test\tool-face.mjs         # 工具面预算，且各模式一字不差
-node test\present-offline.mjs   # 出图 job 化、占用门
-node test\video-cache.mjs       # 录屏摘要缓存，at 只取一张图
-node test\video-decode.mjs      # 硬件解码与软件解码采样逐点相同
+node test\check-docs.mjs          # 文档与工具面一致
+node test\tool-face.mjs           # 工具面预算，且各模式一字不差
+node test\present-offline.mjs     # 出图 job 化、占用门
+node test\video-cache.mjs         # 录屏摘要缓存，at 只取一张图
+node test\video-decode.mjs        # 硬件解码与软件解码采样逐点相同
 node test\appearance-offline.mjs  # 版面看相：分组、空隙、间距、四类问题
 node test\launch-offline.mjs      # launch 决策：不许起第二个实例
 node test\fuzzy-offline.mjs       # 符号名写错给候选
@@ -154,29 +162,36 @@ node test\fuzzy-offline.mjs       # 符号名写错给候选
 ### 已知限制
 
 - **多实例**：同一时间只用一个 EPLAN 会话，多个会话各起一个服务会抢 Remoting 端口。
-- **模态框会挡住一切 API**：启动时的「系统消息」「检查相容性」属于 EPLAN 自己弹的，关掉即可，不需要重启。注册过的脚本文件不要手删，否则每次启动都弹 `S046001`。
+- **模态框会挡住一切 API**：启动时的「系统消息」「检查相容性」是 EPLAN 自己弹的，关掉即可，不需要重启。注册过的脚本文件不要手删，否则每次启动都弹 `S046001`。
 - **写操作不可撤销**：EPLAN API 的改动不进 GUI 撤销栈。用 `dryRun` 先看清楚，或用项目复制留退路。
 - **`manual` 走渲染不走抽文字**：电气手册的字体常常没有 `ToUnicode` 映射，抽出来是乱码（`琤慵ᢈ≥挶`）。
 
-### 目录与文档
+### 目录
 
 ```
-eplan-mcp/
-├── cordis.patch.yml      DSH 预设定义
-├── server/               MCP 服务（12 工具）+ 录屏管线 + 压缩与纠错
-├── bridge/               Remoting 客户端
-├── host/                 进程内宿主（EPLAN 一侧的真正实现）
-├── script/               引导脚本模板与引用集预校验
-├── skills/               6 份知识文件
-├── test/                 离线用例 + 需要 EPLAN 的冒烟测试
-└── docs/                 interfaces.md（接口契约）、LESSONS.md（复盘）
+dsh-eplan/
+├── cordis.patch.yml      预设定义（DSH 入口）
+├── package.json
+├── setup.mjs             一次性安装器
+├── icon.svg / icon.png
+├── locale/               商店卡片文案（中 / 英）
+├── preset/               7 个 DSH 运行时插件（挂载、遮罩、录屏、图额、经验）
+├── server/               MCP 服务 + 录屏 / 手册 / 量图管线
+├── native/               EPLAN 一侧的原生实现
+│   ├── host/             进程内宿主（DataModel，C#）
+│   ├── bridge/           Remoting 客户端（C#）
+│   └── script/           引导脚本模板、编译校验、图鉴生成、临时清理
+├── skills/               7 份知识文件
+├── knowledge/            符号图鉴（随包图片，focus 时按需发）
+├── test/                 离线用例 + 需要 EPLAN 的冒烟
+└── docs/                 接口契约、复盘、安装
 ```
 
 | 想看什么 | 去哪 |
 |---|---|
 | 每个工具的确切参数 | [docs/interfaces.md](docs/interfaces.md) |
 | 为什么这样设计、踩过哪些坑 | [docs/LESSONS.md](docs/LESSONS.md) |
-| 安装、验证、卸载 | [INSTALL.md](INSTALL.md) |
+| 安装、验证、卸载 | [docs/INSTALL.md](docs/INSTALL.md) |
 | 模型侧的知识 | [skills/](skills/) |
 
 MIT License.

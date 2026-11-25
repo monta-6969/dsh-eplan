@@ -6,7 +6,7 @@
 // 真机验证要重启 DSH、建 goal、标完成，一轮几分钟；这里几百毫秒就能把分支走全。
 //
 //   node test/nudge-offline.mjs
-import { apply } from '../experience-nudge.js'
+import { apply } from '../preset/experience-nudge.js'
 
 const handlers = new Map()
 const ctx = {

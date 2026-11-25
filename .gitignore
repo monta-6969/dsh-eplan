@@ -2,11 +2,8 @@
 node_modules/
 
 # 本机编译产物：宿主 DLL 引用的是本机 EPLAN 程序集，跨机器拷贝必然 MissingMethodException
-host/bin/
-bridge/bin/
-
-# 本机路径配置（由 setup.mjs 在目标机生成）
-server/eplan.config.json
+native/host/bin/
+native/bridge/bin/
 
 # 打出来的包装、导出件、临时输出
 dist/
@@ -16,12 +13,11 @@ output/
 _backup/
 
 # 生成出来的引导脚本带时间戳
-script/EplanMcpBootstrap-*.cs
-script/EplanMcpBootstrap.install.cs
+native/script/EplanMcpBootstrap-*.cs
+native/script/EplanMcpBootstrap.install.cs
 
 # 探针小程序编译出来的 exe
 test/*.exe
 
-# Python 字节码
-__pycache__/
-*.pyc
+# 本机路径配置：setup.mjs 现在写到 %LOCALAPPDATA%，包内这份只是老装法/手工调试的兜底
+server/eplan.config.json

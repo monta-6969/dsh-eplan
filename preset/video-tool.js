@@ -84,7 +84,7 @@ export function apply(ctx) {
       render: (_args, value) => value.content,
     },
     async execute(args) {
-      const { measure } = await import('./server/measure.mjs')
+      const { measure } = await import('../server/measure.mjs')
       const payload = await measure(args)
       return { content: [{ type: 'text', text: JSON.stringify(payload) }] }
     },

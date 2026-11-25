@@ -3,7 +3,7 @@
 // 这两段都是「模型写错一次、我们少一轮」的纯函数，不碰 EPLAN、不碰 ffmpeg。
 //   node test/arg-shape.mjs
 import { normalizeEditArgs } from '../server/edit-args.mjs'
-import { videoPathsInText } from '../video-digest.js'
+import { videoPathsInText } from '../preset/video-digest.js'
 
 let pass = 0
 let fail = 0
