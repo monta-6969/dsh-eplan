@@ -133,9 +133,10 @@ const configPath = join(configDir, 'eplan.config.json')
 writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', 'utf8')
 log(`    已写: ${configPath}`)
 
-step(4, '编译宿主和桥接器')
-// 这两步必须在目标机做：DLL 引用的是本机 EPLAN 的程序集。
-for (const build of ['native\\host\\build.ps1', 'native\\bridge\\build.ps1']) {
+step(4, '编译宿主和桥接器、生成引导脚本')
+// 这三步必须在目标机做：DLL 引用的是本机 EPLAN 的程序集，
+// 引导脚本又要写死刚编译出来的宿主目录，所以顺序不能换。
+for (const build of ['native\\host\\build.ps1', 'native\\bridge\\build.ps1', 'native\\script\\prepare-install.ps1']) {
   const full = join(root, build)
   if (!existsSync(full)) {
     console.error(`   缺少构建脚本: ${full}`)
@@ -178,7 +179,11 @@ if (!bootstrap) {
 }
 log('    引导脚本: ' + bootstrap)
 const installText = callBridge('install', { script: bootstrap })
-if (installText.includes('EPLAN_NOT_RUNNING')) {
+// EPLAN 没开时桥接器有两种说法：早期的 EPLAN_NOT_RUNNING，和 Remoting 直接拒绝连接
+// （EndpointNotFoundException / 10061）。都算「没在运行」，否则会掉进最后那个
+// 「装好了，但还没打开项目」的分支，把人指错方向。
+const eplanDown = /EPLAN_NOT_RUNNING|EndpointNotFoundException|10061/.test(installText)
+if (eplanDown) {
   // 注册和自检都得在 EPLAN 进程里做，EPLAN 没开就一定失败。
   // 早退能少打两行一模一样的报错，也免得让人以为「注册这一步出错了」。
   log(`
@@ -193,7 +198,7 @@ log(installText.slice(0, 600))
 const statusText = callBridge('status', {}, 120000)
 log(statusText.slice(0, 800))
 
-if (statusText.includes('EPLAN_NOT_RUNNING')) {
+if (/EPLAN_NOT_RUNNING|EndpointNotFoundException|10061/.test(statusText)) {
   log(`
 EPLAN 没在运行。装好后打开 EPLAN（双击桌面快捷方式即可），再跑一次：
   node setup.mjs

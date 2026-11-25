@@ -7,12 +7,23 @@
 # 产物带时间戳后缀：EPLAN 加载后会锁住 DLL 文件，覆盖会报 CS0016。
 # 每次构建产生新文件名，引导脚本每次调用挑最新的那个，实现热重载。
 #
-# 用法: powershell -NoProfile -ExecutionPolicy Bypass -File host\build.ps1
+# 用法: powershell -NoProfile -ExecutionPolicy Bypass -File native\host\build.ps1
 $ErrorActionPreference = 'Stop'
 
 $root     = Split-Path -Parent $PSScriptRoot
+# EPLAN 安装目录：先看 EPLAN_BIN，再看 setup.mjs 写的配置，最后才是本机默认路径。
 $eplanBin = 'D:\EPLAN\Platform\2.9.4\Bin'
-if ($env:EPLAN_BIN -and (Test-Path -LiteralPath $env:EPLAN_BIN)) { $eplanBin = $env:EPLAN_BIN }
+if ($env:EPLAN_BIN -and (Test-Path -LiteralPath $env:EPLAN_BIN)) {
+  $eplanBin = $env:EPLAN_BIN
+} else {
+  $configFile = Join-Path (Join-Path $env:LOCALAPPDATA 'eplan-mcp') 'eplan.config.json'
+  if (Test-Path -LiteralPath $configFile) {
+    try {
+      $configured = (Get-Content -LiteralPath $configFile -Raw -Encoding UTF8 | ConvertFrom-Json).eplanExe
+      if ($configured -and (Test-Path -LiteralPath $configured)) { $eplanBin = Split-Path -Parent $configured }
+    } catch { }
+  }
+}
 $csc      = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $outDir   = Join-Path $PSScriptRoot 'bin'
 
@@ -60,4 +71,4 @@ foreach ($file in $old) {
 }
 
 Write-Host "OK $outDll" -ForegroundColor Green
-Write-Host '重新生成引导脚本: powershell -NoProfile -ExecutionPolicy Bypass -File script\prepare-install.ps1' -ForegroundColor DarkGray
+Write-Host '重新生成引导脚本: powershell -NoProfile -ExecutionPolicy Bypass -File native\script\prepare-install.ps1' -ForegroundColor DarkGray

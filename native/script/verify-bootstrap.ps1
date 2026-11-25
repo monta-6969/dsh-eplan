@@ -4,7 +4,7 @@
 # 和普通 csc 编译完全不是一回事。本地先用一模一样的引用集编一遍，
 # 就能在把脚本塞进 EPLAN 之前发现 CS0234 那类"命名空间不存在"的错误。
 #
-# 用法: powershell -NoProfile -ExecutionPolicy Bypass -File script\verify-bootstrap.ps1
+# 用法: powershell -NoProfile -ExecutionPolicy Bypass -File native\script\verify-bootstrap.ps1
 $ErrorActionPreference = 'Stop'
 
 $root     = Split-Path -Parent $PSScriptRoot

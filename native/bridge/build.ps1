@@ -4,11 +4,23 @@
 # 足够编一个引用 EplApi 的控制台程序。C# 语言版本是 5，所以代码里不要用
 # 字符串内插、? 、nameof、表达式体成员这些语法。
 #
-# 用法: powershell -NoProfile -ExecutionPolicy Bypass -File bridge\build.ps1
+# 用法: powershell -NoProfile -ExecutionPolicy Bypass -File native\bridge\build.ps1
 $ErrorActionPreference = 'Stop'
 
 $root     = Split-Path -Parent $PSScriptRoot
+# EPLAN 安装目录：先看 EPLAN_BIN，再看 setup.mjs 写的配置，最后才是本机默认路径。
 $eplanBin = 'D:\EPLAN\Platform\2.9.4\Bin'
+if ($env:EPLAN_BIN -and (Test-Path -LiteralPath $env:EPLAN_BIN)) {
+  $eplanBin = $env:EPLAN_BIN
+} else {
+  $configFile = Join-Path (Join-Path $env:LOCALAPPDATA 'eplan-mcp') 'eplan.config.json'
+  if (Test-Path -LiteralPath $configFile) {
+    try {
+      $configured = (Get-Content -LiteralPath $configFile -Raw -Encoding UTF8 | ConvertFrom-Json).eplanExe
+      if ($configured -and (Test-Path -LiteralPath $configured)) { $eplanBin = Split-Path -Parent $configured }
+    } catch { }
+  }
+}
 $csc      = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $outDir   = Join-Path $PSScriptRoot 'bin'
 # 带时间戳：桥接器跑起来后 DLL/EXE 会被占用，同名覆盖必然 CS0016。

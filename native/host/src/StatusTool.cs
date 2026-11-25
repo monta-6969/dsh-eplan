@@ -141,7 +141,7 @@ namespace EplanMcpHost
         //
         // 人设里写的是「去读 skills/xxx/SKILL.md」，但安装目录每台机器不一样；
         // 写死路径换个地方就失效，让模型去找又纯属浪费往返。
-        // 宿主的 DLL 就在 <安装目录>\host\bin\ 下，往上三层就是 bundle 根。
+        // 宿主的 DLL 就在 <安装目录>\native\host\bin\ 下，往上三层就是 bundle 根。
         // ---------------------------------------------------------------
         private static void AppendSkills(JsonValue result)
         {
@@ -150,7 +150,7 @@ namespace EplanMcpHost
                 string hostDir = Path.GetDirectoryName(typeof(StatusTool).Assembly.Location);
                 if (string.IsNullOrEmpty(hostDir)) return;
 
-                string root = Path.GetFullPath(Path.Combine(hostDir, "..", ".."));
+                string root = Path.GetFullPath(Path.Combine(hostDir, "..", "..", ".."));
                 string skillsDir = Path.Combine(root, "skills");
                 result.Set("skillsDir", skillsDir);
                 if (!Directory.Exists(skillsDir)) return;

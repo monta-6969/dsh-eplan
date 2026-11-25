@@ -10,9 +10,9 @@
 // ops\ 不动：那是 operation_rollback 的依据，按时间删等于毁掉回退能力。
 // knowledge\ 不在临时目录（已迁到 %LOCALAPPDATA%），也不可能被这里扫到。
 //
-//   node tools/prune.mjs            按默认策略清
-//   node tools/prune.mjs --dry-run  只报会删什么
-//   node tools/prune.mjs --keep 50  改保留数量
+//   node native/script/prune.mjs            按默认策略清
+//   node native/script/prune.mjs --dry-run  只报会删什么
+//   node native/script/prune.mjs --keep 50  改保留数量
 import { existsSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'

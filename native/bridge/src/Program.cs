@@ -6,7 +6,7 @@
 //   3. 把结果按行写回 stdout {id, ok, result} / {id, ok:false, error}
 //
 // 它自己不懂 EPLAN 的数据模型 —— 那边由 EplanMcpHost.dll 在 EPLAN 进程内完成。
-// 这样做的原因见 script/EplanMcpBootstrap.cs 的注释：EPLAN 的脚本编译器
+// 这样做的原因见 native/script/EplanMcpBootstrap.cs 的注释：EPLAN 的脚本编译器
 // 引用集里没有 DataModelu.dll，所以真正的逻辑必须是我们自己编译的 DLL。
 using System;
 using System.Collections.Generic;
@@ -519,7 +519,7 @@ namespace EplanMcp.Bridge
         // 走文件交换而不是 CallingContext：DeclareAction 必须是无参 void，
         // 带 ActionCallingContext 参数时 ExecuteAction 返回 false 且
         // context.GetContextParameter() 返回 null，参数根本传不进去。
-        // 详见 script/EplanMcpBootstrap.cs 顶部的注释。
+        // 详见 native/script/EplanMcpBootstrap.cs 顶部的注释。
         // ---------------------------------------------------------------
 
         private static JsonValue ForwardToEplan(string op, JsonValue args)
