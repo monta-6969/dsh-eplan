@@ -11,7 +11,8 @@ import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const file = join(here, '..', 'cordis.patch.yml')
-const lines = readFileSync(file, 'utf8').split('\n')
+// 统一去掉行尾的 \r：Windows 上 core.autocrlf 检出的是 CRLF，而这里的正则都以 $ 结尾。
+const lines = readFileSync(file, 'utf8').split('\n').map((line) => line.replace(/\r$/, ''))
 
 // 取出某个 `key: |-` 块标量（按首行缩进去掉公共前缀），取第一个匹配。
 function blockScalar(key) {
