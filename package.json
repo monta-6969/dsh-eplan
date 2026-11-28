@@ -1,7 +1,6 @@
 {
   "name": "dsh-eplan",
   "version": "0.14.0",
-  "private": true,
   "description": "EPLAN Electric P8 drawing automation for DeepSeek Harness: an eplan preset whose only direct tool is run_code, 12 mcp__eplan__* tools that create pages, place symbols, draw and validate schematics, plus a video digest plugin that turns a screen recording into staged full-page frames.",
   "type": "module",
   "license": "MIT",
@@ -29,7 +28,8 @@
     "win32"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=20",
+    "dsh": ">=0.2.2-rc.1 <0.3.0-0"
   },
   "exports": {
     "./cordis.patch.yml": "./cordis.patch.yml",
@@ -40,16 +40,16 @@
     "./server/video.mjs": "./server/video.mjs",
     "./package.json": "./package.json"
   },
-  "peerDependencies": {
-    "@deepseek-ai/dsh-mcp-client": ">=0.2.0-rc.1 <0.3.0-0"
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.2.0",
     "pdfjs-dist": "^4.10.38"
   },
-  "dsh": {
-    "bundle": {
-      "patch": "./cordis.patch.yml"
-    }
+  "peerDependencies": {
+    "@deepseek-ai/dsh-mcp-client": ">=0.2.0-rc.1 <0.3.0-0"
   }
 }
